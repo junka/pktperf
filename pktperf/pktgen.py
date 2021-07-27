@@ -1,19 +1,34 @@
-#!/usr/bin/env python
 import sys
 import re
 import os
 import netaddr
 
 
+RESULT_FIELD=re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
+THROUPUT_FIELD=re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
+
 class Pktgen:
+    """
+    pktgen api class, responsible for operation on
+    /proc/net/pktgen/pgctrl
+	/proc/net/pktgen/kpktgend_X
+    /proc/net/pktgen/ethX
+    /proc/net/pktgen/ethX@Y
+    """
 
     def __init__(self, dev, pkt_size, dest_ip, dest_mac, dst_port, csum, threads,
                  first_thread, clone, num, burst, verbose, debug,
                  ip6, flows, flow_len, tx_delay, append) -> None:
+        if self.os_check() is False:
+            print("Can Only run in Linux system!")
+            sys.exit()
+        if os.getuid() != 0:
+            print("pktperf should be run as root!")
+            sys.exit()
         mod = "/proc/net/pktgen"
         is_exists = os.path.exists(mod)
         if is_exists is False:
-            print("no pktgen mod\nPlease do modprobe pktgen")
+            print("No pktgen module\nPlease do modprobe pktgen")
             sys.exit(0)
         self.pgdev = dev
         self.pkt_size = int(pkt_size)
@@ -58,8 +73,7 @@ class Pktgen:
             self.first_thread = int(first_thread)
         if tx_delay is not None:
             self.tx_delay = int(tx_delay)
-        if self.os_check() is False:
-            sys.exit()
+
 
     # pg_ctrl()   control "pgctrl" (/proc/net/pktgen/pgctrl)
     def pg_ctrl(self, cmd) -> None:
@@ -98,6 +112,9 @@ class Pktgen:
     # pg_thread() control the kernel threads and binding to devices
     def pg_thread(self, thread, cmd) -> None:
         pgthread = "/proc/net/pktgen/kpktgend_%d" % thread
+        if cmd != "rem_device_all" and cmd.find("add_device") != 0 :
+            print("pg_thread do not support cmd %s" % cmd)
+            sys.exit(1)
         try:
             f = open(pgthread, "w")
         except:
@@ -111,16 +128,16 @@ class Pktgen:
             sys.exit(1)
 
     # pktgen is supported on Linux only
-    def os_check(self):
+    def os_check(self) -> bool:
         if os.name == "posix":
             return True
         else:
             return False
 
-    def reset(self):
+    def reset(self) -> None:
         self.pg_ctrl("reset")
 
-    def config_queue(self):
+    def config_queue(self) -> None:
         # General cleanup everything since last run
         if self.append is False:
             self.reset()
@@ -173,19 +190,19 @@ class Pktgen:
             self.pg_set(dev, "flag UDPSRC_RND")
             self.pg_set(dev, "udp_src_min %d" % (udp_src_min))
             self.pg_set(dev, "udp_src_max %d" % (udp_src_max))
-            
+
             # hw burst
             if self.burst is not None and self.burst > 0:
                 self.pg_set(dev, "burst %d" % self.burst)
 
-    def start(self):
+    def start(self) -> None:
         if self.append is False:
             self.pg_ctrl("start")
     
-    def stop(self):
+    def stop(self) -> None:
         self.pg_ctrl("stop")
 
-    def result(self):
+    def result(self) -> None:
             # Print results
         print("%d threads enabled" % self.threads)
         for ti in range(self.first_thread, self.first_thread + self.threads):
@@ -193,9 +210,13 @@ class Pktgen:
             devpath = "/proc/net/pktgen/"+dev
             f = open(devpath, "r")
             a = f.read()
-            print("thread %d result =====" % ti)
-            print(a)
             f.close()
+            res = RESULT_FIELD.search(a)
+            pkt = THROUPUT_FIELD.search(a)
+            print("Thread %d %s send %d pkts: %d pps %d bps %d errors" % 
+                  (ti, res.group(1), int(res.group(2)), int(pkt.group(1)), 
+                   int(pkt.group(2)), int(pkt.group(3))))
+
 
     def numa(self) -> int:
         numapath = "/sys/class/net/%s/device/numa_node" % self.pgdev

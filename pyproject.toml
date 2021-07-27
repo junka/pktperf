@@ -1,13 +1,13 @@
 [tool.poetry]
 name = "pktperf"
-version = "0.1.0"
+version = "0.1.1"
 description = "pktgen scripts tool"
 authors = ["junka <wan.junjie@foxmail.com>"]
 license = "BSD"
 repository = "https://github.com/junka/pktperf"
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.5"
 click = "^8.0.1"
 netaddr = "^0.8.0"
 
