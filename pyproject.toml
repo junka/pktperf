@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "pktperf"
+version = "0.1.0"
+description = "pktgen scripts tool"
+authors = ["Wan Junjie <wanjunjie@bytedance.com>"]
+license = "BSD"
+
+[tool.poetry.dependencies]
+python = "^3.7"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
