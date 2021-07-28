@@ -22,13 +22,14 @@ from .pktgen import Pktgen
 @click.option('-v', help="verbose", is_flag=True)
 @click.option('-x', help="debug", is_flag=True)
 @click.option('-ip6', help="IPv6", required=False, is_flag=True)
-@click.option('-w', help="Tx Delay value (ns)", default=0, required=False)
 @click.option('-z', help="Limit number of flows", default=0, required=False)
 @click.option('-l', help="packets number a flow will send", required=False)
+@click.option('-w', help="Tx Delay value (ns)", default=0, required=False)
 @click.option('-a', help="Script will not reset generator's state, but will append its config",
               required=False, is_flag=True)
-def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a):
-    pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a)
+@click.option('-q', help="queue mapping with irq affinity", required=False, is_flag=True)
+def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q):
+    pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q)
 
     def sig_exit(sig, frame):
         pg.result()

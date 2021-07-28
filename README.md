@@ -26,11 +26,12 @@ Options:
   -v          verbose
   -x          debug
   -ip6        IPv6
-  -w INTEGER  Tx Delay value (ns)
   -z INTEGER  Limit number of flows
   -l TEXT     packets number a flow will send
+  -w INTEGER  Tx Delay value (ns)
   -a          Script will not reset generator's state, but will append its
               config
+  -q          queue mapping with irq affinity
 
   --help      Show this message and exit.
 ```
