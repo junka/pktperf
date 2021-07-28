@@ -32,9 +32,9 @@ Options:
   -a          Script will not reset generator's state, but will append its
               config
   -q          queue mapping with irq affinity
-
   --help      Show this message and exit.
 ```
 
 ## Todo
-A realtime gui like trex
+A realtime gui show PPS stats
+A client show packet loss stats

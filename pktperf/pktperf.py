@@ -2,8 +2,12 @@
 import click
 import os
 import signal
+import threading
+import time
 from .pktgen import Pktgen
 
+
+run_flag = True
 
 @click.command()
 @click.option('-i', help="output interface/device", required=True)
@@ -30,14 +34,24 @@ from .pktgen import Pktgen
 @click.option('-q', help="queue mapping with irq affinity", required=False, is_flag=True)
 def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q):
     pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q)
-
+    global run_flag
+    
     def sig_exit(sig, frame):
-        pg.result()
+        pg.result(True)
 
+    tui = threading.Thread(target=ui_func, name="ui", args=(pg,), daemon=True)
     signal.signal(signal.SIGINT, sig_exit)
     pg.config_queue()
+    tui.start()
     pg.start()
+    run_flag = False
+    tui.join()
     os.kill(os.getpid(), signal.SIGINT)
+
+def ui_func(pg):
+    while run_flag:
+        pg.result(False)
+        time.sleep(1)
 
 def main():
     opt_cli()

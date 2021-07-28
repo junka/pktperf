@@ -1,12 +1,7 @@
 import sys
 import re
 import os
-from typing import List
 import netaddr
-
-
-RESULT_FIELD=re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
-THROUPUT_FIELD=re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
 
 class Pktgen:
     """Pktgen class
@@ -103,9 +98,13 @@ class Pktgen:
             self.flows = int(flows)
         if flow_len is not None:
             self.flow_len = int(flow_len)
-        numa = self.dev_numa()
-        self.irq_list = self.get_irqs()
-        self.cpu_list = self.node_cpu_list(numa)
+        if queue is True:
+            numa = self.dev_numa()
+            self.irq_list = self.get_irqs()
+            if len(self.irq_list) == 0:
+                print("irq affinity not supported")
+                sys.exit()
+            self.cpu_list = self.node_cpu_list(numa)
 
     # pg_ctrl()   control "pgctrl" (/proc/net/pktgen/pgctrl)
     def pg_ctrl(self, cmd) -> None:
@@ -114,16 +113,10 @@ class Pktgen:
             print("pgctrl do not support cmd %s" % cmd)
             sys.exit(1)
         try:
-            f = open(pgctrl, 'r+')
+            with open(pgctrl, 'r+') as f:
+                f.write("%s\n" % cmd)
         except Exception as e:
             print("Error: Cannot open %s, error %s" % (pgctrl, e))
-            sys.exit(1)
-        try:
-            f.write("%s\n" % cmd)
-            f.flush()
-            f.close()
-        except Exception as e:
-            print("Error: Cannot write or close fail, error %s" % e)
             sys.exit(1)
 
     # pg_set()    control setup of individual devices
@@ -138,7 +131,7 @@ class Pktgen:
             f.write("%s\n" % flag)
             f.close()
         except:
-            print("Error: Cannot write or close fail")
+            print("Error: Cannot write or close fail %s" % (pgdev))
             sys.exit(1)
 
     # pg_thread() control the kernel threads and binding to devices
@@ -261,24 +254,38 @@ class Pktgen:
     def stop(self) -> None:
         self.pg_ctrl("stop")
 
-    def result(self) -> None:
-            # Print results
-        print("%d threads enabled" % self.threads)
+    def result(self, last) -> None:
+        # Print results
+        if last is True:
+            print("%d cores enabled" % self.threads)
         for ti in range(self.first_thread, self.first_thread + self.threads):
             if self.queue is True:
                 thr = self.cpu_list[ti]
                 dev = "%s@%d" % (self.pgdev , thr)
             else:
                 dev= "%s@%d" % (self.pgdev,  ti)
-            devpath = "/proc/net/pktgen/"+dev
+            devpath = "/proc/net/pktgen/%s" % dev
             f = open(devpath, "r")
             a = f.read()
             f.close()
-            res = RESULT_FIELD.search(a)
-            pkt = THROUPUT_FIELD.search(a)
-            print("Thread %d %s send %d pkts: %d pps %d bps %d errors" % 
-                  (ti, res.group(1), int(res.group(2)), int(pkt.group(1)), 
-                   int(pkt.group(2)), int(pkt.group(3))))
+            if last is False:
+                SOFAR_FIELD = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
+                sofar = SOFAR_FIELD.search(a)
+                if sofar is not None:
+                    print("Core %d send %s pkts %s errors" % (ti, sofar.group(1), sofar.group(2)))
+            else:
+                RESULT_FIELD = re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
+                THROUPUT_FIELD = re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
+                UNRESULT_FIELD = re.compile(r'Result: (\w+)')
+                res = RESULT_FIELD.search(a)
+                pkt = THROUPUT_FIELD.search(a)
+                other = UNRESULT_FIELD.search(a)
+                if res is not None and pkt is not None:
+                    print("Core %d %s send %d pkts: %d pps %d bps %d errors" % 
+                        (ti, res.group(1), int(res.group(2)), int(pkt.group(1)), 
+                        int(pkt.group(2)), int(pkt.group(3))))
+                elif other is not None:
+                    print("Core %d %s" %(ti, other.group(1)))
 
     def dev_numa(self) -> int:
         numa_path = "/sys/class/net/%s/device/numa_node" % self.pgdev
@@ -286,7 +293,7 @@ class Pktgen:
             f = open(numa_path, "r")
         except:
             print("Error: Cannot open %s" % (numa_path))
-            sys.exit(-1)
+            return 0
         try:
             node = f.read().rstrip('\n')
             f.close()
