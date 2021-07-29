@@ -1,7 +1,38 @@
+from __future__ import division
 import sys
 import re
 import os
 import netaddr
+
+
+class PktSar:
+    """pkt sar stats class
+
+    calculate the pps and bps from the text
+    """
+    def __init__(self, start_time, pkt_size) -> None:
+        self.start = start_time
+        self._pkts = 0
+        self._pkt_size = pkt_size
+        self._bytes = 0
+        self.last_update = start_time
+        self.pps = 0.0
+        self.bps = 0.0
+
+    def update(self, pkts_so_far, timestamp):
+        diff_pkts = pkts_so_far - self._pkts
+        self._pkts = pkts_so_far
+        diff_time = ((timestamp - self.last_update)/1000000)
+        self.last_update = timestamp
+        if timestamp == self.start:
+            self.pps = 0.0
+            self.bps = 0.0
+        else:
+            self.pps = diff_pkts / diff_time
+            self.bps = self.pps * (self._pkt_size + 4)
+
+    def get_stats(self):
+        return self.pps, self.bps
 
 class Pktgen:
     """Pktgen class
@@ -90,6 +121,7 @@ class Pktgen:
             self.burst = int(burst)
         if threads is not None:
             self.threads = int(threads)
+        self.stats = []
         if first_thread is not None:
             self.first_thread = int(first_thread)
         if tx_delay is not None:
@@ -254,10 +286,17 @@ class Pktgen:
     def stop(self) -> None:
         self.pg_ctrl("stop")
 
-    def result(self, last) -> None:
+    def result(self, last, print_cb) -> None:
         # Print results
         if last is True:
             print("%d cores enabled" % self.threads)
+        need_init = False
+        total_pkts = 0
+        total_pps = 0
+        total_bps = 0
+        total_err = 0
+        if len(self.stats) == 0:
+            need_init = True
         for ti in range(self.first_thread, self.first_thread + self.threads):
             if self.queue is True:
                 thr = self.cpu_list[ti]
@@ -270,9 +309,23 @@ class Pktgen:
             f.close()
             if last is False:
                 SOFAR_FIELD = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
+                TIME_FIELD = re.compile(r'started: (\d+)us  stopped: (\d+)us')
                 sofar = SOFAR_FIELD.search(a)
+                tim = TIME_FIELD.search(a)
+                if need_init is True:
+                    ps = PktSar(int(tim.group(1)), self.pkt_size)
+                    self.stats.append(ps)
+                else:
+                    ps = self.stats[ti - self.first_thread]
                 if sofar is not None:
-                    print("Core %d send %s pkts %s errors" % (ti, sofar.group(1), sofar.group(2)))
+                    ps.update(int(sofar.group(1)), int(tim.group(2)))
+                    pps, bps = ps.get_stats()
+                    total_pkts += int(sofar.group(1))
+                    total_pps += pps
+                    total_bps += bps
+                    total_err += int(sofar.group(2))
+                    print_cb("Core%3d send %24d pkts: %f pps %f bps %d errors" %
+                             (ti, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
             else:
                 RESULT_FIELD = re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
                 THROUPUT_FIELD = re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
@@ -281,11 +334,17 @@ class Pktgen:
                 pkt = THROUPUT_FIELD.search(a)
                 other = UNRESULT_FIELD.search(a)
                 if res is not None and pkt is not None:
-                    print("Core %d %s send %d pkts: %d pps %d bps %d errors" % 
-                        (ti, res.group(1), int(res.group(2)), int(pkt.group(1)), 
+                    total_pkts += int(res.group(2))
+                    total_pps += int(pkt.group(1))
+                    total_bps += int(pkt.group(2))
+                    total_err += int(pkt.group(3))
+                    print_cb("Core%3d send %24d pkts: %d pps %d bps %d errors" % 
+                        (ti, int(res.group(2)), int(pkt.group(1)), 
                         int(pkt.group(2)), int(pkt.group(3))))
                 elif other is not None:
-                    print("Core %d %s" %(ti, other.group(1)))
+                    print_cb("Core%3d %s" %(ti, other.group(1)))
+        print_cb("Total   send %24d pkts: %d pps %d bps  %d errors" %
+                 (total_pkts, total_pps, total_bps, total_err))
 
     def dev_numa(self) -> int:
         numa_path = "/sys/class/net/%s/device/numa_node" % self.pgdev
