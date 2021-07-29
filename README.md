@@ -1,15 +1,20 @@
 # pktperf
 pktgen is very useful for network performance test, especially when we don't have 
 multiple nics for dpdk. And for ```vm2vm``` test, it would be easy to use for end-user.
+
 Pktperf is a very thin layer for pktgen (the kernel version).
+
 It makes use of the sample scripts in linux kernel [https://github.com/torvalds/linux/tree/master/samples/pktgen]
+
 All ```cmds``` in [https://www.kernel.org/doc/Documentation/networking/pktgen.txt]
 
 ## install
 ```pip3 install pktperf```
 
 ## usage
+```
 python3 -m pktperf.pktperf 
+```
 
 It keeps parameters the same with sample scripts.
 ```
