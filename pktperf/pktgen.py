@@ -10,7 +10,7 @@ class PktSar:
 
     calculate the pps and bps from the text
     """
-    def __init__(self, start_time, pkt_size) -> None:
+    def __init__(self, start_time:int, pkt_size:int) -> None:
         self.start = start_time
         self._pkts = 0
         self._pkt_size = pkt_size
@@ -48,7 +48,7 @@ class Pktgen:
                  first_thread, clone, num, burst, verbose, debug,
                  ip6, flows, flow_len, tx_delay, append, queue) -> None:
         """Init pktgen module with parameters
-        
+
         Args:
             dev: nic device name
             pkt_size: packet size to generate
@@ -155,15 +155,10 @@ class Pktgen:
     def pg_set(self, dev, flag) -> None:
         pgdev = "/proc/net/pktgen/%s" % dev
         try:
-            f = open(pgdev, "r+")
+            with open(pgdev, "r+") as f:
+                f.write("%s\n" % flag)
         except:
             print("Error: Cannot open %s" % (pgdev))
-            sys.exit(1)
-        try:
-            f.write("%s\n" % flag)
-            f.close()
-        except:
-            print("Error: Cannot write or close fail %s" % (pgdev))
             sys.exit(1)
 
     # pg_thread() control the kernel threads and binding to devices
@@ -173,33 +168,21 @@ class Pktgen:
             print("pg_thread do not support cmd %s" % cmd)
             sys.exit(1)
         try:
-            f = open(pgthread, "w")
+            with open(pgthread, "w") as f:
+                f.write("%s\n" % cmd)
         except:
             print("Error: Cannot open %s" % (pgthread))
-            sys.exit(1)
-        try:
-            f.write("%s\n" % cmd)
-            f.close()
-        except:
-            print("Error: Cannot write or close fail")
             sys.exit(1)
 
     # pktgen is supported on Linux only
     def os_check(self) -> bool:
-        if os.name == "posix":
-            return True
-        else:
-            return False
+        return os.name == "posix"
 
     def config_irq_affinity(self, irq, thread):
         irq_path = "/proc/irq/%d/smp_affinity_list" % irq
         try:
-            f = open(irq_path, 'r+')
-        except:
-            sys.exit()
-        try:
-            f.write("%d\n" % thread)
-            f.close()
+            with open(irq_path, 'r+') as f:
+                f.write("%d\n" % thread)
         except:
             sys.exit()
         if self.debug is True:
@@ -225,7 +208,7 @@ class Pktgen:
             if self.append is False:
                 self.pg_thread(ti, "rem_device_all")
             self.pg_thread(ti, "add_device %s" % dev)
-            
+
             # select queue and bind the queue and $dev in 1:1 relationship
             if self.queue is True:
                 qid = (ti - self.first_thread)
@@ -282,7 +265,7 @@ class Pktgen:
     def start(self) -> None:
         if self.append is False:
             self.pg_ctrl("start")
-    
+
     def stop(self) -> None:
         self.pg_ctrl("stop")
 
@@ -304,9 +287,8 @@ class Pktgen:
             else:
                 dev= "%s@%d" % (self.pgdev,  ti)
             devpath = "/proc/net/pktgen/%s" % dev
-            f = open(devpath, "r")
-            a = f.read()
-            f.close()
+            with open(devpath, "r") as f:
+                a = f.read()
             if last is False:
                 SOFAR_FIELD = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
                 TIME_FIELD = re.compile(r'started: (\d+)us  stopped: (\d+)us')
@@ -338,8 +320,8 @@ class Pktgen:
                     total_pps += int(pkt.group(1))
                     total_bps += int(pkt.group(2))
                     total_err += int(pkt.group(3))
-                    print_cb("Core%3d send %24d pkts: %d pps %d bps %d errors" % 
-                        (ti, int(res.group(2)), int(pkt.group(1)), 
+                    print_cb("Core%3d send %24d pkts: %d pps %d bps %d errors" %
+                        (ti, int(res.group(2)), int(pkt.group(1)),
                         int(pkt.group(2)), int(pkt.group(3))))
                 elif other is not None:
                     print_cb("Core%3d %s" %(ti, other.group(1)))
@@ -349,33 +331,22 @@ class Pktgen:
     def dev_numa(self) -> int:
         numa_path = "/sys/class/net/%s/device/numa_node" % self.pgdev
         try:
-            f = open(numa_path, "r")
+            with open(numa_path, "r") as f:
+                node = f.read().rstrip('\n')
         except:
             print("Error: Cannot open %s" % (numa_path))
             return 0
-        try:
-            node = f.read().rstrip('\n')
-            f.close()
-        except:
-            print("Error: Cannot read %s" % (numa_path))
-            sys.exit(-1)
         if node == '-1':
             return 0
-        else:
-            return int(node)
+        return int(node)
 
     def node_cpu_list(self, node) -> list:
         cpu_list = "/sys/devices/system/node/node%d/cpulist" % node
         try:
-            f = open(cpu_list, 'r')
+            with open(cpu_list, 'r') as f:
+                cpu_range = f.read()
         except:
             print("Error: Cannot open %s" % (cpu_list))
-            sys.exit(-1)
-        try:
-            cpu_range = f.read()
-            f.close()
-        except:
-            print("Error: Cannot read %s" % (cpu_list))
             sys.exit(-1)
         ranges = cpu_range.split(',')
         ret = []
@@ -389,12 +360,8 @@ class Pktgen:
         proc_intr = "/proc/interrupts"
         msi_irqs = "/sys/class/net/%s/device/msi_irqs" % self.pgdev
         try:
-            f = open(proc_intr, "r")
-        except:
-            sys.exit()
-        try:
-            intrs = f.read()
-            f.close()
+            with open(proc_intr, "r") as f:
+                intrs = f.read()
         except:
             sys.exit()
         irqs = []
@@ -412,9 +379,9 @@ class Pktgen:
                 irqs.append(int(i.group(1)))
             return irqs
         dirs = os.listdir(msi_irqs)
-        for d in dirs:
-            MSI_IRQ = re.compile(r'%s:.*TxRx' % d)
+        for dev_q in dirs:
+            MSI_IRQ = re.compile(r'%s:.*TxRx' % dev_q)
             match = MSI_IRQ.search(intrs)
             if match is not None:
-                irqs.append(int(d))
+                irqs.append(int(dev_q))
         return irqs

@@ -1,16 +1,16 @@
 #!/usr/bin/env python
-import click
 import os
+import sys
 import signal
 import threading
 import time
 import curses
-import sys
+import click
 from .pktgen import Pktgen
 
 
-run_flag = True
-screen_y = 0
+__run_flag__ = True
+__screen_y__ = 0
 
 @click.command()
 @click.option('-i', help="output interface/device", required=True)
@@ -37,9 +37,9 @@ screen_y = 0
 @click.option('-q', help="queue mapping with irq affinity", required=False, is_flag=True)
 def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q):
     pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q)
-    global run_flag
+    global __run_flag__
 
-    def sig_exit(sig, frame):
+    def sig_exit(_sig, _frame):
         curses.endwin()
         pg.result(True, print)
         sys.exit(0)
@@ -50,22 +50,22 @@ def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q):
     pg.config_queue()
     tui.start()
     pg.start()
-    run_flag = False
+    __run_flag__ = False
     tui.join()
     os.kill(os.getpid(), signal.SIGINT)
 
 def ui_func(pg, stdscr):
-    
-    global screen_y
-    
+    global __screen_y__
+    global __run_flag__
+
     def curse_str(str):
-        global screen_y
-        stdscr.addstr(screen_y, 0, str)
-        screen_y += 1
-        
-    while run_flag:
+        global __screen_y__
+        stdscr.addstr(__screen_y__, 0, str)
+        __screen_y__ += 1
+
+    while __run_flag__:
         stdscr.clear()
-        screen_y = 0
+        __screen_y__ = 0
         pg.result(False, curse_str)
         time.sleep(1)
         stdscr.refresh()
