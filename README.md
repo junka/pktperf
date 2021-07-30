@@ -40,7 +40,10 @@ Options:
   -w INTEGER  Tx Delay value (ns)
   -a          Script will not reset generator's state, but will append its
               config
-  -q          queue mapping with irq affinity
+  -q          queue mapping with interrupts affinity
+  -o INTEGER  tos for IPv4 or traffic class for IPv6 traffic
+  -r TEXT     bps rate limit per thread
+  -y TEXT     pps rate limit per thread
   --help      Show this message and exit.
 ```
 

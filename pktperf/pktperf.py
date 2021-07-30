@@ -35,8 +35,11 @@ __screen_y__ = 0
 @click.option('-a', help="Script will not reset generator's state, but will append its config",
               required=False, is_flag=True)
 @click.option('-q', help="queue mapping with irq affinity", required=False, is_flag=True)
-def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q):
-    pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q)
+@click.option('-o', help="tos for IPv4 or traffic class for IPv6 traffic", default=0, required=False)
+@click.option('-r', help="bps rate limit per thread", required=False)
+@click.option('-y', help="pps rate limit per thread", required=False)
+def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y):
+    pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y)
     global __run_flag__
 
     def sig_exit(_sig, _frame):

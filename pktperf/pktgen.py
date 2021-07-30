@@ -45,8 +45,8 @@ class Pktgen:
     """
 
     def __init__(self, dev, pkt_size, dest_ip, dest_mac, dst_port, csum, threads,
-                 first_thread, clone, num, burst, verbose, debug,
-                 ip6, flows, flow_len, tx_delay, append, queue) -> None:
+                 first_thread, clone, num, burst, verbose, debug, ip6, flows,
+                 flow_len, tx_delay, append, queue, tos, bps_rate, pps_rate) -> None:
         """Init pktgen module with parameters
 
         Args:
@@ -137,6 +137,10 @@ class Pktgen:
                 print("irq affinity not supported")
                 sys.exit()
             self.cpu_list = self.node_cpu_list(numa)
+        if tos is not None:
+            self.tos = int(tos)
+        self.bps_rate = bps_rate
+        self.pps_rate = pps_rate
 
     # pg_ctrl()   control "pgctrl" (/proc/net/pktgen/pgctrl)
     def pg_ctrl(self, cmd) -> None:
@@ -226,6 +230,11 @@ class Pktgen:
             self.pg_set(dev, "clone_skb %d" % self.clone)
             self.pg_set(dev, "pkt_size %d" % self.pkt_size)
             self.pg_set(dev, "delay %d" % self.tx_delay)
+            if self.tos is not None and self.tos != 0:
+                if self.ipv6 is True:
+                    self.pg_set(dev, "traffic_class %x" % self.tos)
+                else:
+                    self.pg_set(dev, "tos %s" % self.tos)
 
             # Flag example disabling timestamping
             self.pg_set(dev, "flag NO_TIMESTAMP")
@@ -258,6 +267,12 @@ class Pktgen:
             # hw burst
             if self.burst is not None and self.burst > 0:
                 self.pg_set(dev, "burst %d" % self.burst)
+            
+            # rate limit
+            if self.bps_rate is not None:
+                self.pg_set(dev, "rate %s" % (self.bps_rate))
+            if self.pps_rate is not None:
+                self.pg_set(dev, "ratep %s" % (self.pps_rate))
 
     def reset(self) -> None:
         self.pg_ctrl("reset")
