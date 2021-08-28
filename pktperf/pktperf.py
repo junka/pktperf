@@ -4,13 +4,11 @@ import sys
 import signal
 import threading
 import time
-import curses
 import click
 from .pktgen import Pktgen
 
 
 __run_flag__ = True
-__screen_y__ = 0
 
 @click.command()
 @click.option('-i', help="output interface/device", required=True)
@@ -43,12 +41,10 @@ def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y):
     global __run_flag__
 
     def sig_exit(_sig, _frame):
-        curses.endwin()
         pg.result(True, print)
         sys.exit(0)
 
-    stdscr = curses_gui()
-    tui = threading.Thread(target=ui_func, name="ui", args=(pg, stdscr), daemon=True)
+    tui = threading.Thread(target=ui_func, name="ui", args=(pg,), daemon=True)
     signal.signal(signal.SIGINT, sig_exit)
     pg.config_queue()
     tui.start()
@@ -57,27 +53,14 @@ def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y):
     tui.join()
     os.kill(os.getpid(), signal.SIGINT)
 
-def ui_func(pg, stdscr):
-    global __screen_y__
+def ui_func(pg):
     global __run_flag__
 
-    def curse_str(str):
-        global __screen_y__
-        stdscr.addstr(__screen_y__, 0, str)
-        __screen_y__ += 1
-
     while __run_flag__:
-        stdscr.clear()
-        __screen_y__ = 0
-        pg.result(False, curse_str)
+        print("")
+        pg.result(False, print)
         time.sleep(1)
-        stdscr.refresh()
 
-def curses_gui():
-    stdscr = curses.initscr()
-    curses.noecho()
-    curses.cbreak()
-    return stdscr
 
 def main():
     opt_cli()

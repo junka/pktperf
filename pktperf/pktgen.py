@@ -321,7 +321,7 @@ class Pktgen:
                     total_pps += pps
                     total_bps += bps
                     total_err += int(sofar.group(2))
-                    print_cb("Core%3d send %24d pkts: %f pps %f bps %d errors" %
+                    print_cb("Core%3d send %18d pkts: %18f pps %18f bps %6d errors" %
                              (ti, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
             else:
                 RESULT_FIELD = re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
@@ -335,12 +335,12 @@ class Pktgen:
                     total_pps += int(pkt.group(1))
                     total_bps += int(pkt.group(2))
                     total_err += int(pkt.group(3))
-                    print_cb("Core%3d send %24d pkts: %d pps %d bps %d errors" %
+                    print_cb("Core%3d send %18d pkts: %18d pps %18d bps %6d errors" %
                         (ti, int(res.group(2)), int(pkt.group(1)),
                         int(pkt.group(2)), int(pkt.group(3))))
                 elif other is not None:
                     print_cb("Core%3d %s" %(ti, other.group(1)))
-        print_cb("Total   send %24d pkts: %d pps %d bps  %d errors" %
+        print_cb("Total   send %18d pkts: %18d pps %18d bps %6d errors" %
                  (total_pkts, total_pps, total_bps, total_err))
 
     def dev_numa(self) -> int:
