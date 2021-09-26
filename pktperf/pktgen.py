@@ -46,7 +46,8 @@ class Pktgen:
 
     def __init__(self, dev, pkt_size, dest_ip, dest_mac, dst_port, csum, threads,
                  first_thread, clone, num, burst, verbose, debug, ip6, flows,
-                 flow_len, tx_delay, append, queue, tos, bps_rate, pps_rate) -> None:
+                 flow_len, tx_delay, append, queue, tos, bps_rate, pps_rate,
+                 frags) -> None:
         """Init pktgen module with parameters
 
         Args:
@@ -102,6 +103,7 @@ class Pktgen:
         self.dst_ip_max = ip_list[-1]
         self.dst_port_max = None
         self.dst_port_min = None
+        self.frags = None
         if dst_port is not None:
             ports = dst_port.split('-')
             if len(ports) == 2:
@@ -141,6 +143,8 @@ class Pktgen:
             self.tos = int(tos)
         self.bps_rate = bps_rate
         self.pps_rate = pps_rate
+        if frags is not None:
+            self.frags = int(frags)
 
     # pg_ctrl()   control "pgctrl" (/proc/net/pktgen/pgctrl)
     def pg_ctrl(self, cmd) -> None:
@@ -229,6 +233,8 @@ class Pktgen:
             self.pg_set(dev, "count %d" % self.num)
             self.pg_set(dev, "clone_skb %d" % self.clone)
             self.pg_set(dev, "pkt_size %d" % self.pkt_size)
+            if self.frags is not None and self.frags != 1:
+                self.pg_set(dev, "frags %d" % self.frags)
             self.pg_set(dev, "delay %d" % self.tx_delay)
             if self.tos is not None and self.tos != 0:
                 if self.ipv6 is True:

@@ -4,6 +4,7 @@ import sys
 import signal
 import threading
 import time
+from typing_extensions import Required
 import click
 from .pktgen import Pktgen
 
@@ -36,8 +37,9 @@ __run_flag__ = True
 @click.option('-o', help="tos for IPv4 or traffic class for IPv6 traffic", default=0, required=False)
 @click.option('-r', help="bps rate limit per thread", required=False)
 @click.option('-y', help="pps rate limit per thread", required=False)
-def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y):
-    pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y)
+@click.option('-e', help="send pakcet as fragments", required=False)
+def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y, e):
+    pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y, e)
     global __run_flag__
 
     def sig_exit(_sig, _frame):
