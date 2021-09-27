@@ -44,6 +44,7 @@ Options:
   -o INTEGER  tos for IPv4 or traffic class for IPv6 traffic
   -r TEXT     bps rate limit per thread
   -y TEXT     pps rate limit per thread
+  -e TEXT     frags number in skb_shared_info
   --help      Show this message and exit.
 ```
 
