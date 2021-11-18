@@ -12,9 +12,11 @@ All ```cmds``` in [https://www.kernel.org/doc/Documentation/networking/pktgen.tx
 ```pip3 install pktperf```
 
 ## usage
+A simple sample command would be 
 ```
-python3 -m pktperf.pktperf 
+python3 -m pktperf.pktperf -i eth0 -s 64 -m 00:78:0a:fa:34:12 -t 12 -c 1200 -d 192.168.10.100 -n 0
 ```
+
 
 It keeps parameters the same with sample scripts.
 ```
@@ -48,10 +50,7 @@ Options:
   --help      Show this message and exit.
 ```
 
-A simple sample command would be 
-```
-python3 -m pktperf.pktperf -i eth0 -s 64 -m 00:78:0a:fa:34:12 -t 12 -c 1200 -d 192.168.10.100 -n 0
-```
+
 
 During pktgen running, all stats will be display with 1 sec interval
 ```
@@ -71,5 +70,19 @@ Total   send                130439679 pkts: 10833488 pps 5546745856 bps  0 error
 ```
 
 
-## Todo
-(Consider )A client show packet loss stats
+```pkts``` are exactly the number sent out the each queue, if you see any of them less than
+the others, there could be a rate limit for the port or the queue.
+
+
+By default, the flows contain packets with udp src port 9 to 1009. It means sending
+1k flows. With ```-p``` you can specified udp dst port range. So if you want send 100k
+flows, put ```-p 200-300``` into the parameters.
+
+
+the limit options ```-y``` and ```-r``` seems not working for pktgen now.
+
+
+I don't see any verbose print with ```-x``` or ```-v```, maybe remove them later.
+
+
+With ```-b``` the pktgen could get more performance gain.

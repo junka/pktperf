@@ -384,7 +384,7 @@ class Pktgen:
             with open(proc_intr, "r") as f:
                 intrs = f.read()
         except:
-            sys.exit()
+            return []
         irqs = []
         DEV_QUEUE_IRQ = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+' %(self.pgdev))
         match = DEV_QUEUE_IRQ.finditer(intrs)
@@ -399,10 +399,13 @@ class Pktgen:
             for i in match:
                 irqs.append(int(i.group(1)))
             return irqs
-        dirs = os.listdir(msi_irqs)
-        for dev_q in dirs:
-            MSI_IRQ = re.compile(r'%s:.*TxRx' % dev_q)
-            match = MSI_IRQ.search(intrs)
-            if match is not None:
-                irqs.append(int(dev_q))
-        return irqs
+        try:
+            dirs = os.listdir(msi_irqs)
+            for dev_q in dirs:
+                MSI_IRQ = re.compile(r'%s:.*TxRx' % dev_q)
+                match = MSI_IRQ.search(intrs)
+                if match is not None:
+                    irqs.append(int(dev_q))
+            return irqs
+        except:
+            return []
