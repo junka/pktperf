@@ -91,16 +91,30 @@ class Pktgen:
                 dest_ip = "FD00::1"
             else:
                 dest_ip = "198.18.0.42"
+        net = None
         try:
             net = netaddr.IPNetwork(dest_ip)
         except:
-            print("invalid ip address format")
-            sys.exit()
-        ip_list = list(net)
-        if ip_list[0].version == 6:
-            self.ipv6 = True
-        self.dst_ip_min = ip_list[0]
-        self.dst_ip_max = ip_list[-1]
+            ip_list = dest_ip.split('-')
+            try:
+                self.dst_ip_min = netaddr.IPAddress(ip_list[0])
+            except:
+                print("invalid ip address format")
+                sys.exit()
+            if len(ip_list) == 2:
+                try:
+                    self.dst_ip_max = netaddr.IPAddress(ip_list[1])
+                except:
+                    print("invalid ip address format")
+                    sys.exit()
+            elif len(ip_list) == 1:
+                    self.dst_ip_max = self.dst_ip_min
+        if net is not None:
+            ip_list = list(net)
+            if ip_list[0].version == 6:
+                self.ipv6 = True
+            self.dst_ip_min = ip_list[0]
+            self.dst_ip_max = ip_list[-1]
         self.dst_port_max = None
         self.dst_port_min = None
         self.frags = None

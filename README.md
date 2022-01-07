@@ -79,6 +79,11 @@ By default, the flows contain packets with udp src port 9 to 1009. It means send
 flows, put ```-p 200-300``` into the parameters.
 
 
+```-d``` specifies the destination ip address, with ```192.168.0.100/31```, the pktgen will
+send packets to both 192.168.0.100 and 192.168.0.101. Or you can use range like port range 
+above ```192.168.0.100-192.168.0.101``` instead.
+
+
 the limit options ```-y``` and ```-r``` seems not working for pktgen now.
 
 
