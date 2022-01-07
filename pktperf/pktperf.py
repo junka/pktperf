@@ -4,7 +4,6 @@ import sys
 import signal
 import threading
 import time
-from typing_extensions import Required
 import click
 from .pktgen import Pktgen
 
