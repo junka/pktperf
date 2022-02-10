@@ -14,40 +14,56 @@ All ```cmds``` in [https://www.kernel.org/doc/Documentation/networking/pktgen.tx
 ## usage
 A simple sample command would be 
 ```
-python3 -m pktperf.pktperf -i eth0 -s 64 -m 00:78:0a:fa:34:12 -t 12 -c 1200 -d 192.168.10.100 -n 0
+pktperf -i eth0 -s 64 -m 00:78:0a:fa:34:12 -t 12 -c 1200 -d 192.168.10.100 -n 0
 ```
 
 
 It keeps parameters the same with sample scripts.
 ```
-Usage: pktperf.py [OPTIONS]
+usage: pktperf.py [-h] -i INTERFACE [-s SIZE] [-d DEST] [-m MAC]
+                  [-p PORTRANGE] [-k] [-t THREADS] [-f FIRSTTHREAD] [-c CLONE]
+                  [-n NUM] [-b BURST] [-v] [-x] [--ipv6] [-z FLOWS]
+                  [-l FLOWPKT] [-w DELAY] [-a] [-q] [-o TOS] [-r BPS] [-y PPS]
+                  [-e FRAGS]
 
-Options:
-  -i TEXT     output interface/device  [required]
-  -s INTEGER  packet size
-  -d TEXT     destination IP. CIDR is also allowed
-  -m TEXT     destination MAC-addr
-  -p TEXT     destination PORT range is also allowed
-  -k          enable UDP tx checksum
-  -t INTEGER  threads to start
-  -f INTEGER  index of first thread
-  -c INTEGER  SKB clones send before alloc new SKB
-  -n INTEGER  num messages to send per thread, 0 means indefinitely
-  -b INTEGER  HW level bursting of SKBs
-  -v          verbose
-  -x          debug
-  -ip6        IPv6
-  -z INTEGER  Limit number of flows
-  -l TEXT     packets number a flow will send
-  -w INTEGER  Tx Delay value (ns)
-  -a          Script will not reset generator's state, but will append its
-              config
-  -q          queue mapping with interrupts affinity
-  -o INTEGER  tos for IPv4 or traffic class for IPv6 traffic
-  -r TEXT     bps rate limit per thread
-  -y TEXT     pps rate limit per thread
-  -e TEXT     frags number in skb_shared_info
-  --help      Show this message and exit.
+pktgen python scripts
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -i INTERFACE, --interface INTERFACE
+                        output interface/device
+  -s SIZE, --size SIZE  packet size
+  -d DEST, --dest DEST  destination IP. CIDR is also allowed
+  -m MAC, --mac MAC     destination MAC-addr
+  -p PORTRANGE, --portrange PORTRANGE
+                        destination PORT range is also allowed
+  -k, --txcsum          enable UDP tx checksum
+  -t THREADS, --threads THREADS
+                        threads to start
+  -f FIRSTTHREAD, --firstthread FIRSTTHREAD
+                        index of first thread
+  -c CLONE, --clone CLONE
+                        SKB clones send before alloc new SKB
+  -n NUM, --num NUM     num messages to send per thread, 0 means indefinitely
+  -b BURST, --burst BURST
+                        HW level bursting of SKBs
+  -v, --verbose         verbose
+  -x, --debug           debug
+  --ipv6                IPv6
+  -z FLOWS, --flows FLOWS
+                        Limit number of flows
+  -l FLOWPKT, --flowpkt FLOWPKT
+                        packets number a flow will send
+  -w DELAY, --delay DELAY
+                        Tx Delay value (ns)
+  -a, --append          Script will not reset generator's state, but will
+                        append its config
+  -q, --queuemap        queue mapping with irq affinity
+  -o TOS, --tos TOS     tos for IPv4 or traffic class for IPv6 traffic
+  -r BPS, --bps BPS     bps rate limit per thread
+  -y PPS, --pps PPS     pps rate limit per thread
+  -e FRAGS, --frags FRAGS
+                        frags number in skb_shared_info
 ```
 
 

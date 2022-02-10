@@ -1,3 +1,6 @@
+"""
+classes provide functions for pktgen operation
+"""
 from __future__ import division
 import sys
 import re
@@ -43,7 +46,8 @@ class Pktgen:
     /proc/net/pktgen/ethX
     /proc/net/pktgen/ethX@Y
     """
-
+    # pylint: disable=too-many-instance-attributes
+    # pylint: disable=too-many-arguments
     def __init__(self, dev, pkt_size, dest_ip, dest_mac, dst_port, csum, threads,
                  first_thread, clone, num, burst, verbose, debug, ip6, flows,
                  flow_len, tx_delay, append, queue, tos, bps_rate, pps_rate,
@@ -80,7 +84,7 @@ class Pktgen:
         mod = "/proc/net/pktgen"
         is_exists = os.path.exists(mod)
         if is_exists is False:
-            print("No pktgen module\nPlease do modprobe pktgen")
+            print("No pktgen module\nPlease do \'modprobe pktgen\'")
             sys.exit(0)
         self.pgdev = dev
         self.pkt_size = int(pkt_size)
@@ -108,7 +112,7 @@ class Pktgen:
                     print("invalid ip address format")
                     sys.exit()
             elif len(ip_list) == 1:
-                    self.dst_ip_max = self.dst_ip_min
+                self.dst_ip_max = self.dst_ip_min
         if net is not None:
             ip_list = list(net)
             if ip_list[0].version == 6:
@@ -147,7 +151,7 @@ class Pktgen:
         if flow_len is not None:
             self.flow_len = int(flow_len)
         if queue is True:
-            numa = self.dev_numa()
+            numa = self.get_dev_numa()
             self.irq_list = self.get_irqs()
             if len(self.irq_list) == 0:
                 print("irq affinity not supported")
@@ -160,7 +164,7 @@ class Pktgen:
         if frags is not None:
             self.frags = int(frags)
 
-    # pg_ctrl()   control "pgctrl" (/proc/net/pktgen/pgctrl)
+    # pg_ctrl control "pgctrl" (/proc/net/pktgen/pgctrl)
     def pg_ctrl(self, cmd) -> None:
         pgctrl = "/proc/net/pktgen/pgctrl"
         if cmd not in ["start", "stop", "reset"]:
@@ -173,7 +177,7 @@ class Pktgen:
             print("Error: Cannot open %s, error %s" % (pgctrl, e))
             sys.exit(1)
 
-    # pg_set()    control setup of individual devices
+    # pg_set control setup of individual devices
     def pg_set(self, dev, flag) -> None:
         pgdev = "/proc/net/pktgen/%s" % dev
         try:
@@ -198,9 +202,11 @@ class Pktgen:
 
     # pktgen is supported on Linux only
     def os_check(self) -> bool:
+        """ check if os is linux """
         return os.name == "posix"
 
     def config_irq_affinity(self, irq, thread):
+        """ config irq affinity """
         irq_path = "/proc/irq/%d/smp_affinity_list" % irq
         try:
             with open(irq_path, 'r+') as f:
@@ -287,7 +293,7 @@ class Pktgen:
             # hw burst
             if self.burst is not None and self.burst > 0:
                 self.pg_set(dev, "burst %d" % self.burst)
-            
+
             # rate limit
             if self.bps_rate is not None:
                 self.pg_set(dev, "rate %s" % (self.bps_rate))
@@ -305,7 +311,7 @@ class Pktgen:
         self.pg_ctrl("stop")
 
     def result(self, last, print_cb) -> None:
-        # Print results
+        """ Print results """
         if last is True:
             print("%d cores enabled" % self.threads)
         need_init = False
@@ -323,12 +329,12 @@ class Pktgen:
                 dev= "%s@%d" % (self.pgdev,  ti)
             devpath = "/proc/net/pktgen/%s" % dev
             with open(devpath, "r") as f:
-                a = f.read()
+                stats_content = f.read()
             if last is False:
-                SOFAR_FIELD = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
-                TIME_FIELD = re.compile(r'started: (\d+)us  stopped: (\d+)us')
-                sofar = SOFAR_FIELD.search(a)
-                tim = TIME_FIELD.search(a)
+                sofar_field = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
+                time_field = re.compile(r'started: (\d+)us  stopped: (\d+)us')
+                sofar = sofar_field.search(stats_content)
+                tim = time_field.search(stats_content)
                 if need_init is True:
                     ps = PktSar(int(tim.group(1)), self.pkt_size)
                     self.stats.append(ps)
@@ -344,12 +350,12 @@ class Pktgen:
                     print_cb("Core%3d send %18d pkts: %18f pps %18f bps %6d errors" %
                              (ti, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
             else:
-                RESULT_FIELD = re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
-                THROUPUT_FIELD = re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
-                UNRESULT_FIELD = re.compile(r'Result: (\w+)')
-                res = RESULT_FIELD.search(a)
-                pkt = THROUPUT_FIELD.search(a)
-                other = UNRESULT_FIELD.search(a)
+                result_field = re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
+                throughput_field = re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
+                unresult_field = re.compile(r'Result: (\w+)')
+                res = result_field.search(stats_content)
+                pkt = throughput_field.search(stats_content)
+                other = unresult_field.search(stats_content)
                 if res is not None and pkt is not None:
                     total_pkts += int(res.group(2))
                     total_pps += int(pkt.group(1))
@@ -363,7 +369,8 @@ class Pktgen:
         print_cb("Total   send %18d pkts: %18d pps %18d bps %6d errors" %
                  (total_pkts, total_pps, total_bps, total_err))
 
-    def dev_numa(self) -> int:
+    # get_dev_numa returns the numa node of the device
+    def get_dev_numa(self) -> int:
         numa_path = "/sys/class/net/%s/device/numa_node" % self.pgdev
         try:
             with open(numa_path, "r") as f:
@@ -375,6 +382,7 @@ class Pktgen:
             return 0
         return int(node)
 
+    # node_cpu_list returns the cpu list of the node
     def node_cpu_list(self, node) -> list:
         cpu_list = "/sys/devices/system/node/node%d/cpulist" % node
         try:
@@ -392,6 +400,7 @@ class Pktgen:
         return ret
 
     def get_irqs(self):
+        """ read out irqs """
         proc_intr = "/proc/interrupts"
         msi_irqs = "/sys/class/net/%s/device/msi_irqs" % self.pgdev
         try:
@@ -400,24 +409,24 @@ class Pktgen:
         except:
             return []
         irqs = []
-        DEV_QUEUE_IRQ = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+' %(self.pgdev))
-        match = DEV_QUEUE_IRQ.finditer(intrs)
+        devq_irq = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+' %(self.pgdev))
+        match = devq_irq.finditer(intrs)
         print(match)
-        if len(DEV_QUEUE_IRQ.findall(intrs)) > 0:
+        if len(devq_irq.findall(intrs)) > 0:
             for i in match:
                 irqs.append(int(i.group(1)))
             return irqs
-        DEV_IRQ = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-\d+' %(self.pgdev))
-        match = DEV_IRQ.finditer(intrs)
-        if len(DEV_IRQ.findall(intrs)) > 0:
+        dev_irq = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-\d+' %(self.pgdev))
+        match = dev_irq.finditer(intrs)
+        if len(dev_irq.findall(intrs)) > 0:
             for i in match:
                 irqs.append(int(i.group(1)))
             return irqs
         try:
             dirs = os.listdir(msi_irqs)
             for dev_q in dirs:
-                MSI_IRQ = re.compile(r'%s:.*TxRx' % dev_q)
-                match = MSI_IRQ.search(intrs)
+                msi_irq = re.compile(r'%s:.*TxRx' % dev_q)
+                match = msi_irq.search(intrs)
                 if match is not None:
                     irqs.append(int(dev_q))
             return irqs

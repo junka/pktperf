@@ -4,67 +4,74 @@ import sys
 import signal
 import threading
 import time
-import click
+import argparse
 from .pktgen import Pktgen
 
 
 __run_flag__ = True
 
-@click.command()
-@click.option('-i', help="output interface/device", required=True)
-@click.option('-s', help="packet size", default=60, required=False)
-@click.option('-d', help="destination IP. CIDR is also allowed", required=False)
-@click.option('-m', help="destination MAC-addr", default="90:e2:ba:ff:ff:ff",
-              required=False)
-@click.option('-p', help="destination PORT range is also allowed", required=False)
-@click.option('-k', help="enable UDP tx checksum", required=False, is_flag=True)
-@click.option('-t', help="threads to start", default=1, required=False)
-@click.option('-f', help="index of first thread", default=0, required=False)
-@click.option('-c', help="SKB clones send before alloc new SKB", default=0, required=False)
-@click.option('-n', help="num messages to send per thread, 0 means indefinitely",
-              default=100000, required=False)
-@click.option('-b', help="HW level bursting of SKBs", default=0, required=False)
-@click.option('-v', help="verbose", is_flag=True)
-@click.option('-x', help="debug", is_flag=True)
-@click.option('-ip6', help="IPv6", required=False, is_flag=True)
-@click.option('-z', help="Limit number of flows", default=0, required=False)
-@click.option('-l', help="packets number a flow will send", required=False)
-@click.option('-w', help="Tx Delay value (ns)", default=0, required=False)
-@click.option('-a', help="Script will not reset generator's state, but will append its config",
-              required=False, is_flag=True)
-@click.option('-q', help="queue mapping with irq affinity", required=False, is_flag=True)
-@click.option('-o', help="tos for IPv4 or traffic class for IPv6 traffic", default=0, required=False)
-@click.option('-r', help="bps rate limit per thread", required=False)
-@click.option('-y', help="pps rate limit per thread", required=False)
-@click.option('-e', help="frags number in skb_shared_info", required=False)
-def opt_cli(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y, e):
-    pg = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y, e)
+
+def opt_cli(args):
+    pktgen = Pktgen(args.interface, args.size, args.dest, args.mac,
+                    args.portrange, args.txcsum, args.threads, args.firstthread,
+                    args.clone, args.num, args.burst, args.verbose, args.debug,
+                    args.ipv6, args.flows, args.flowpkt, args.delay,
+                    args.append, args.queuemap, args.tos, args.bps,
+                    args.pps, args.frags)
+    # pktgen = Pktgen(i, s, d, m, p, k, t, f, c, n, b, v, x, ip6, z, l, w, a, q, o, r, y, e)
     global __run_flag__
 
     def sig_exit(_sig, _frame):
-        pg.result(True, print)
+        pktgen.result(True, print)
         sys.exit(0)
 
-    tui = threading.Thread(target=ui_func, name="ui", args=(pg,), daemon=True)
+    tui = threading.Thread(target=ui_func, name="ui", args=(pktgen,), daemon=True)
     signal.signal(signal.SIGINT, sig_exit)
-    pg.config_queue()
+    pktgen.config_queue()
     tui.start()
-    pg.start()
+    pktgen.start()
     __run_flag__ = False
     tui.join()
     os.kill(os.getpid(), signal.SIGINT)
 
-def ui_func(pg):
+
+def ui_func(pktgen):
     global __run_flag__
 
     while __run_flag__:
         print("")
-        pg.result(False, print)
+        pktgen.result(False, print)
         time.sleep(1)
 
 
-def main():
-    opt_cli()
+parser = argparse.ArgumentParser(description="pktgen python scripts")
+parser.add_argument('-i', '--interface', help="output interface/device", required=True)
+parser.add_argument('-s', '--size', help="packet size", default=60, required=False)
+parser.add_argument('-d', '--dest', help="destination IP. CIDR is also allowed", required=False)
+parser.add_argument('-m', '--mac', help="destination MAC-addr", default="90:e2:ba:ff:ff:ff", required=False)
+parser.add_argument('-p', '--portrange',  help="destination PORT range is also allowed", required=False)
+parser.add_argument('-k', '--txcsum', help="enable UDP tx checksum", required=False, action="store_true")
+parser.add_argument('-t', '--threads', help="threads to start", default=1, required=False)
+parser.add_argument('-f', '--firstthread', help="index of first thread", default=0, required=False)
+parser.add_argument('-c', '--clone', help="SKB clones send before alloc new SKB", default=0, required=False)
+parser.add_argument('-n', '--num', help="num messages to send per thread, 0 means indefinitely",
+              default=100000, required=False)
+parser.add_argument('-b', '--burst', help="HW level bursting of SKBs", default=0, required=False)
+parser.add_argument('-v', '--verbose', help="verbose", action="store_true")
+parser.add_argument('-x', '--debug', help="debug", action="store_true")
+parser.add_argument('--ipv6', help="IPv6", required=False, action="store_true")
+parser.add_argument('-z', '--flows', help="Limit number of flows", default=0, required=False)
+parser.add_argument('-l', '--flowpkt', help="packets number a flow will send", required=False)
+parser.add_argument('-w', '--delay', help="Tx Delay value (ns)", default=0, required=False)
+parser.add_argument('-a', '--append', help="Script will not reset generator's state, but will append its config",
+              required=False, action="store_true")
+parser.add_argument('-q', '--queuemap', help="queue mapping with irq affinity", required=False, action="store_true")
+parser.add_argument('-o', '--tos', help="tos for IPv4 or traffic class for IPv6 traffic",
+              default=0, required=False)
+parser.add_argument('-r', '--bps', help="bps rate limit per thread", required=False)
+parser.add_argument('-y', '--pps', help="pps rate limit per thread", required=False)
+parser.add_argument('-e', '--frags', help="frags number in skb_shared_info", required=False)
 
 if __name__ == "__main__":
-    main()
+    args = parser.parse_args()
+    opt_cli(args)
