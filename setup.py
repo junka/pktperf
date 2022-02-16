@@ -7,7 +7,7 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='pktperf',
-    version="0.2.0",
+    version="0.2.1",
     description="pktgen python scripts",
     author="junka",
     author_email="wan.junjie@fixmail.com",
