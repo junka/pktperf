@@ -3,16 +3,16 @@
 import os
 import sys
 import signal
-import threading
+from threading import Event, Thread
 import time
 import argparse
 from .pktgen import Pktgen
 
 
-__run_flag__ = True
+event = Event()
 
 
-def opt_cli(args):
+def parse_options(args):
     """ opt_cli parse args and init the pktgen """
     pktgen = Pktgen(args.interface, args.size, args.dest, args.mac,
                     args.portrange, args.txcsum, args.threads,
@@ -20,28 +20,24 @@ def opt_cli(args):
                     args.verbose, args.debug, args.ipv6, args.flows,
                     args.flowpkt, args.delay, args.append, args.queuemap,
                     args.tos, args.bps, args.pps, args.frags)
-    global __run_flag__
 
     def sig_exit(_sig, _frame):
         pktgen.result(True, print)
         sys.exit(0)
 
-    tui = threading.Thread(target=ui_func, name="ui",
-                           args=(pktgen,), daemon=True)
+    tui = Thread(target=ui_func, name="ui", args=(pktgen,), daemon=True)
     signal.signal(signal.SIGINT, sig_exit)
     pktgen.config_queue()
     tui.start()
     pktgen.start()
-    __run_flag__ = False
+    event.set()
     tui.join()
     os.kill(os.getpid(), signal.SIGINT)
 
 
 def ui_func(pktgen):
     """ ui_func prints out statistics """
-    global __run_flag__
-
-    while __run_flag__:
+    while not event.is_set():
         print("")
         pktgen.result(False, print)
         time.sleep(1)
@@ -98,7 +94,7 @@ parser.add_argument('-e', '--frags', help="frags number in skb_shared_info",
 def main():
     """ main function entry """
     pargs = parser.parse_args()
-    opt_cli(pargs)
+    parse_options(pargs)
 
 
 if __name__ == "__main__":

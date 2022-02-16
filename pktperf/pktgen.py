@@ -8,6 +8,16 @@ import ipaddress
 from .pktsar import PktSar
 
 
+def open_write_error(filename, flag,  mode="r+"):
+    """open and write a flag to file"""
+    try:
+        with open(filename, mode) as fp_dev:
+            fp_dev.write("%s\n" % flag)
+    except IOError:
+        print("Error: Cannot open %s" % (filename))
+        sys.exit(1)
+
+
 class Pktgen:
     """Pktgen class
 
@@ -69,17 +79,17 @@ class Pktgen:
         net = None
         try:
             net = ipaddress.ip_network(dest_ip, strict=False)
-        except:
+        except (ValueError, TypeError):
             ip_list = dest_ip.split('-')
             try:
                 self.dst_ip_min = ipaddress.ip_address(ip_list[0])
-            except:
+            except (ValueError, TypeError):
                 print("invalid ip address format")
                 sys.exit()
             if len(ip_list) == 2:
                 try:
                     self.dst_ip_max = ipaddress.ip_address(ip_list[1])
-                except:
+                except (ValueError, TypeError):
                     print("invalid ip address format")
                     sys.exit()
             elif len(ip_list) == 1:
@@ -141,22 +151,12 @@ class Pktgen:
         if cmd not in ["start", "stop", "reset"]:
             print("pgctrl do not support cmd %s" % cmd)
             sys.exit(1)
-        try:
-            with open(pgctrl, 'r+') as fp_ctl:
-                fp_ctl.write("%s\n" % cmd)
-        except Exception as e:
-            print("Error: Cannot open %s, error %s" % (pgctrl, e))
-            sys.exit(1)
+        open_write_error(pgctrl, cmd)
 
     def pg_set(self, dev, flag) -> None:
         """pg_set control setup of individual devices"""
         pgdev = "/proc/net/pktgen/%s" % dev
-        try:
-            with open(pgdev, "r+") as fp_dev:
-                fp_dev.write("%s\n" % flag)
-        except:
-            print("Error: Cannot open %s" % (pgdev))
-            sys.exit(1)
+        open_write_error(pgdev, flag)
 
     def pg_thread(self, thread, cmd) -> None:
         """pg_thread() control the kernel threads and binding to devices """
@@ -164,12 +164,7 @@ class Pktgen:
         if cmd != "rem_device_all" and cmd.find("add_device") != 0:
             print("pg_thread do not support cmd %s" % cmd)
             sys.exit(1)
-        try:
-            with open(pgthread, "w") as fp_thread:
-                fp_thread.write("%s\n" % cmd)
-        except:
-            print("Error: Cannot open %s" % (pgthread))
-            sys.exit(1)
+        open_write_error(pgthread, cmd, "w")
 
     # pktgen is supported on Linux only
     def os_check(self) -> bool:
@@ -179,11 +174,7 @@ class Pktgen:
     def config_irq_affinity(self, irq, thread):
         """ config irq affinity """
         irq_path = "/proc/irq/%d/smp_affinity_list" % irq
-        try:
-            with open(irq_path, 'r+') as fp_irq:
-                fp_irq.write("%d\n" % thread)
-        except:
-            sys.exit()
+        open_write_error(irq_path, thread)
         if self.debug is True:
             print("irq %d is set affinity to %d" % (irq, thread))
 
@@ -194,31 +185,32 @@ class Pktgen:
             self.reset()
 
         # Threads are specified with parameter -t value in $THREADS
-        for ti in range(self.first_thread, self.first_thread + self.threads):
+        for i in range(self.first_thread, self.first_thread + self.threads):
             if self.queue is True:
-                thr = self.cpu_list[ti]
+                thr = self.cpu_list[i]
                 dev = "%s@%d" % (self.pgdev, thr)
-                self.config_irq_affinity(self.irq_list[ti - self.first_thread], thr)
+                irq = self.irq_list[i - self.first_thread]
+                self.config_irq_affinity(irq, thr)
             else:
                 # The device name is extended with @name, using thread id to
                 # make then unique, but any name will do.
-                dev = "%s@%d" % (self.pgdev, ti)
+                dev = "%s@%d" % (self.pgdev, i)
 
             # Add remove all other devices and add_device $dev to thread
             if self.append is False:
-                self.pg_thread(ti, "rem_device_all")
-            self.pg_thread(ti, "add_device %s" % dev)
+                self.pg_thread(i, "rem_device_all")
+            self.pg_thread(i, "add_device %s" % dev)
 
             # select queue and bind the queue and $dev in 1:1 relationship
             if self.queue is True:
-                qid = (ti - self.first_thread)
+                qid = (i - self.first_thread)
                 if self.debug is True:
                     print("queue number is %d" % (qid))
                 self.pg_set(dev, "queue_map_min %d" % qid)
                 self.pg_set(dev, "queue_map_max %d" % qid)
 
             # Notice config queue to map to cpu (mirrors smp_processor_id())
-            # It is beneficial to map IRQ /proc/irq/*/smp_affinity 1:1 to CPU number
+            # It is beneficial to map IRQ /proc/irq/*/smp_affinity 1:1 to CPU
             self.pg_set(dev, "flag QUEUE_MAP_CPU")
 
             # Base config of dev
@@ -296,12 +288,12 @@ class Pktgen:
         total_err = 0
         if len(self.stats) == 0:
             need_init = True
-        for ti in range(self.first_thread, self.first_thread + self.threads):
+        for i in range(self.first_thread, self.first_thread + self.threads):
             if self.queue is True:
-                thr = self.cpu_list[ti]
+                thr = self.cpu_list[i]
                 dev = "%s@%d" % (self.pgdev, thr)
             else:
-                dev = "%s@%d" % (self.pgdev, ti)
+                dev = "%s@%d" % (self.pgdev, i)
             devpath = "/proc/net/pktgen/%s" % dev
             with open(devpath, "r") as fp_dev:
                 stats_content = fp_dev.read()
@@ -314,7 +306,7 @@ class Pktgen:
                     pkt_sar = PktSar(int(tim.group(1)), self.pkt_size)
                     self.stats.append(pkt_sar)
                 else:
-                    pkt_sar = self.stats[ti - self.first_thread]
+                    pkt_sar = self.stats[i - self.first_thread]
                 if sofar is not None:
                     pkt_sar.update(int(sofar.group(1)), int(tim.group(2)))
                     pps, bps = pkt_sar.get_stats()
@@ -323,7 +315,7 @@ class Pktgen:
                     total_bps += bps
                     total_err += int(sofar.group(2))
                     print_cb("Core%3d send %18d pkts: %18f pps %18f bps %6d errors" %
-                             (ti, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
+                             (i, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
             else:
                 result_field = re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
                 throughput_field = re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
@@ -337,10 +329,10 @@ class Pktgen:
                     total_bps += int(pkt.group(2))
                     total_err += int(pkt.group(3))
                     print_cb("Core%3d send %18d pkts: %18d pps %18d bps %6d errors" %
-                             (ti, int(res.group(2)), int(pkt.group(1)),
+                             (i, int(res.group(2)), int(pkt.group(1)),
                               int(pkt.group(2)), int(pkt.group(3))))
                 elif other is not None:
-                    print_cb("Core%3d %s" % (ti, other.group(1)))
+                    print_cb("Core%3d %s" % (i, other.group(1)))
         print_cb("Total   send %18d pkts: %18d pps %18d bps %6d errors" %
                  (total_pkts, total_pps, total_bps, total_err))
 
@@ -350,7 +342,7 @@ class Pktgen:
         try:
             with open(numa_path, "r") as fp_numa:
                 node = fp_numa.read().rstrip('\n')
-        except:
+        except IOError:
             print("Error: Cannot open %s" % (numa_path))
             return 0
         if node == '-1':
@@ -363,7 +355,7 @@ class Pktgen:
         try:
             with open(cpu_list, 'r') as fp_cpu:
                 cpu_range = fp_cpu.read()
-        except:
+        except IOError:
             print("Error: Cannot open %s" % (cpu_list))
             sys.exit(-1)
         ranges = cpu_range.split(',')
@@ -381,7 +373,7 @@ class Pktgen:
         try:
             with open(proc_intr, "r") as fp_proc:
                 intrs = fp_proc.read()
-        except:
+        except IOError:
             return []
         irqs = []
         devq_irq = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+' % (self.pgdev))
@@ -405,5 +397,5 @@ class Pktgen:
                 if match is not None:
                     irqs.append(int(dev_q))
             return irqs
-        except:
+        except IOError:
             return []
