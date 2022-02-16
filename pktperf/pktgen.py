@@ -4,7 +4,7 @@ classes provide functions for pktgen operation
 import sys
 import re
 import os
-import netaddr
+import ipaddress
 from .pktsar import PktSar
 
 
@@ -68,17 +68,17 @@ class Pktgen:
                 dest_ip = "198.18.0.42"
         net = None
         try:
-            net = netaddr.IPNetwork(dest_ip)
+            net = ipaddress.ip_network(dest_ip, strict=False)
         except:
             ip_list = dest_ip.split('-')
             try:
-                self.dst_ip_min = netaddr.IPAddress(ip_list[0])
+                self.dst_ip_min = ipaddress.ip_address(ip_list[0])
             except:
                 print("invalid ip address format")
                 sys.exit()
             if len(ip_list) == 2:
                 try:
-                    self.dst_ip_max = netaddr.IPAddress(ip_list[1])
+                    self.dst_ip_max = ipaddress.ip_address(ip_list[1])
                 except:
                     print("invalid ip address format")
                     sys.exit()
