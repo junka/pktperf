@@ -24,13 +24,14 @@ class PktSar:
         diff_pkts = pkts_so_far - self._pkts
         self._pkts = pkts_so_far
         diff_time = ((timestamp - self.last_update)/1000000)
-        self.last_update = timestamp
-        if timestamp == self.start:
-            self.pps = 0.0
-            self.bps = 0.0
-        else:
-            self.pps = diff_pkts / diff_time
-            self.bps = self.pps * (self._pkt_size + 4)
+        if diff_time != 0:
+            self.last_update = timestamp
+            if timestamp == self.start:
+                self.pps = 0.0
+                self.bps = 0.0
+            else:
+                self.pps = diff_pkts / diff_time
+                self.bps = self.pps * (self._pkt_size + 4)
 
     def get_stats(self):
         """ get stats """

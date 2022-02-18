@@ -1,15 +1,11 @@
 #!/usr/bin/env python
 """ pktperf with cli options"""
-import os
 import sys
 import signal
-from threading import Event, Thread
+from threading import Thread, Event
 import time
 import argparse
 from .pktgen import Pktgen
-
-
-event = Event()
 
 
 def parse_options(args):
@@ -21,21 +17,22 @@ def parse_options(args):
                     args.flowpkt, args.delay, args.append, args.queuemap,
                     args.tos, args.bps, args.pps, args.frags)
 
+    event = Event()
+    tui = Thread(target=ui_func, name="ui", args=(pktgen, event,), daemon=False)
+
     def sig_exit(_sig, _frame):
+        event.set()
+        tui.join()
         pktgen.result(True, print)
         sys.exit(0)
 
-    tui = Thread(target=ui_func, name="ui", args=(pktgen,), daemon=True)
     signal.signal(signal.SIGINT, sig_exit)
     pktgen.config_queue()
     tui.start()
     pktgen.start()
-    event.set()
-    tui.join()
-    os.kill(os.getpid(), signal.SIGINT)
 
 
-def ui_func(pktgen):
+def ui_func(pktgen, event):
     """ ui_func prints out statistics """
     while not event.is_set():
         print("")

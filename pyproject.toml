@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pktperf"
-version = "0.2.1"
+version = "0.2.2"
 description = "pktgen scripts tool"
 authors = ["junka <wan.junjie@foxmail.com>"]
 license = "BSD"
