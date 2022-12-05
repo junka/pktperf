@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "pktperf"
-version = "0.2.2"
+version = "0.3.0"
 description = "pktgen scripts tool"
 authors = ["junka <wan.junjie@foxmail.com>"]
 license = "BSD"
@@ -16,5 +16,5 @@ python = "^3.5"
 pktperf = 'pktperf.pktperf:main'
 
 [build-system]
-requires = ["poetry-core>=1.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools>=42"]
+build-backend = "setuptools.build_meta"

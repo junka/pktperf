@@ -91,7 +91,7 @@ the others, there could be a rate limit for the port or the queue.
 
 
 By default, the flows contain packets with udp src port 9 to 1009. It means sending
-1k flows. With ```-p``` you can specified udp dst port range. So if you want send 100k
+1k flows. With ```-p``` you can specify udp dst port range. So if you want send 100k
 flows, put ```-p 200-300``` into the parameters.
 
 

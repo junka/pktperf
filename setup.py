@@ -2,12 +2,12 @@
 from pathlib import Path
 from setuptools import setup
 
-this_directory = Path(__file__).parent
-long_description = (this_directory / "README.md").read_text()
+with open("README.md", "r", encoding="utf-8") as fh:
+    long_description = fh.read()
 
 setup(
     name='pktperf',
-    version="0.2.2",
+    version="0.3.0",
     description="pktgen python scripts",
     author="junka",
     author_email="wan.junjie@fixmail.com",
@@ -20,5 +20,12 @@ setup(
     },
     python_requires=">=3.5",
     long_description=long_description,
-    long_description_content_type='text/markdown'
+    long_description_content_type='text/markdown',
+    project_urls={
+        "Bug Tracker": "https://github.com/junka/pktperf/issues",
+    },
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: BSD License",
+    ],
 )
