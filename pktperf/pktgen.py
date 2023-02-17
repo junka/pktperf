@@ -98,6 +98,8 @@ class Pktgen:
         self.pps_rate = args.pps
         if args.frags is not None:
             self.frags = int(args.frags)
+        self.vlan = args.vlan
+        self.svlan = args.svlan
 
     def __init_ip_dst(self, is_ipv6, dest):
         """ Init pktgen module ip dst """
@@ -210,6 +212,13 @@ class Pktgen:
             else:
                 self.pg_set(dev, "tos %s" % self.tos)
 
+    def __config_vlan(self, dev) -> None:
+        """config vlan related parameter """
+        if self.vlan is not None and 0 <= int(self.vlan) < 4096:
+            self.pg_set(dev, "vlan_id %d" % int(self.vlan))
+        if self.svlan is not None and 0 <= int(self.svlan) < 4096:
+            self.pg_set(dev, "svlan_id %d" % int(self.svlan))
+
     def __config_udp_portrange(self, dev) -> None:
         """config udp port range """
         if self.dst_port_max is not None:
@@ -284,6 +293,7 @@ class Pktgen:
                 self.pg_set(dev, "dst_max %s" % (self.dst_ip_max))
 
             self.__config_udp_portrange(dev)
+            self.__config_vlan(dev)
 
             # hw burst
             if self.burst is not None and self.burst > 0:
