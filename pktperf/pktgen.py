@@ -8,10 +8,10 @@ import ipaddress
 from .pktsar import PktSar
 
 
-def open_write_error(filename, flag,  mode="r+"):
+def open_write_error(filename, flag, mode="r+"):
     """open and write a flag to file"""
     try:
-        with open(filename, mode) as fp_dev:
+        with open(filename, mode, encoding='utf-8') as fp_dev:
             fp_dev.write("%s\n" % flag)
     except IOError:
         print("Error: Cannot open %s" % (filename))
@@ -27,12 +27,10 @@ class Pktgen:
     /proc/net/pktgen/ethX
     /proc/net/pktgen/ethX@Y
     """
+
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=too-many-arguments
-    def __init__(self, dev, pkt_size, dest_ip, dest_mac, dst_port, csum,
-                 threads, first_thread, clone, num, burst, verbose, debug,
-                 ip6, flows, flow_len, tx_delay, append, queue, tos,
-                 bps_rate, pps_rate, frags) -> None:
+    def __init__(self, args) -> None:
         """Init pktgen module with parameters
 
         Args:
@@ -57,7 +55,7 @@ class Pktgen:
             queue: queue mapping with irq affinity
         """
         if self.os_check() is False:
-            print("Can Only run in Linux system!")
+            print("pktperf Can Only run in Linux system!")
             sys.exit()
         if os.getuid() != 0:
             print("pktperf should be run as root!")
@@ -67,12 +65,45 @@ class Pktgen:
         if is_exists is False:
             print("No pktgen module\nPlease do \'modprobe pktgen\'")
             sys.exit(0)
-        self.pgdev = dev
-        self.pkt_size = int(pkt_size)
-        self.dst_mac = dest_mac
-        self.ipv6 = ip6
-        if dest_ip is None:
-            if ip6 is True:
+        self.pgdev = args.interface
+        self.pkt_size = int(args.size)
+        self.dst_mac = args.mac
+        self.__init_ip_dst(args.ip6, args.dest)
+        self.__init_port_range(args.portrange)
+        self.frags = None
+        self.csum = args.txcsum
+        self.debug = args.debug
+        self.verbose = args.verbose
+        self.append = args.append
+        if args.clone is not None:
+            self.clone = int(args.clone)
+        self.num = int(args.num)
+        if args.burst is not None:
+            self.burst = int(args.burst)
+        if args.threads is not None:
+            self.threads = int(args.threads)
+        self.stats = []
+        if args.first_thread is not None:
+            self.first_thread = int(args.first_thread)
+        if args.delay is not None:
+            self.tx_delay = int(args.delay)
+        if args.flows is not None:
+            self.flows = int(args.flows)
+        if args.flowpkt is not None:
+            self.flow_len = int(args.flowpkt)
+        self.__init_irq(args.queue_map)
+        if args.tos is not None:
+            self.tos = int(args.tos)
+        self.bps_rate = args.bps
+        self.pps_rate = args.pps
+        if args.frags is not None:
+            self.frags = int(args.frags)
+
+    def __init_ip_dst(self, is_ipv6, dest):
+        """ Init pktgen module ip dst """
+        self.ipv6 = is_ipv6
+        if dest is None:
+            if self.ipv6 is True:
                 dest_ip = "FD00::1"
             else:
                 dest_ip = "198.18.0.42"
@@ -100,52 +131,32 @@ class Pktgen:
                 self.ipv6 = True
             self.dst_ip_min = ip_list[0]
             self.dst_ip_max = ip_list[-1]
+
+    def __init_port_range(self, portrange) -> None:
+        """init port range for pktgen"""
         self.dst_port_max = None
         self.dst_port_min = None
-        self.frags = None
-        if dst_port is not None:
-            ports = dst_port.split('-')
+        if portrange is not None:
+            ports = portrange.split('-')
             if len(ports) == 2:
                 self.dst_port_max = int(ports[1])
             elif len(ports) == 1:
                 self.dst_port_max = int(ports[0])
             self.dst_port_min = int(ports[0])
-        self.csum = csum
-        self.debug = debug
-        self.verbose = verbose
-        self.append = append
-        self.queue = queue
-        if clone is not None:
-            self.clone = int(clone)
-        self.num = int(num)
-        if burst is not None:
-            self.burst = int(burst)
-        if threads is not None:
-            self.threads = int(threads)
-        self.stats = []
-        if first_thread is not None:
-            self.first_thread = int(first_thread)
-        if tx_delay is not None:
-            self.tx_delay = int(tx_delay)
-        if flows is not None:
-            self.flows = int(flows)
-        if flow_len is not None:
-            self.flow_len = int(flow_len)
-        if queue is True:
-            numa = self.get_dev_numa()
-            self.irq_list = self.get_irqs()
+
+    def __init_irq(self, queuemap) -> None:
+        """init irq affinity if queue mapping enabled"""
+        self.queue = queuemap
+        if queuemap is True:
+            numa = self.__get_dev_numa()
+            self.irq_list = self.__get_irqs()
             if len(self.irq_list) == 0:
                 print("irq affinity not supported")
                 sys.exit()
-            self.cpu_list = self.node_cpu_list(numa)
-        if tos is not None:
-            self.tos = int(tos)
-        self.bps_rate = bps_rate
-        self.pps_rate = pps_rate
-        if frags is not None:
-            self.frags = int(frags)
+            self.cpu_list = self.__node_cpu_list(numa)
 
-    def pg_ctrl(self, cmd) -> None:
+    @staticmethod
+    def pg_ctrl(cmd) -> None:
         """pg_ctrl control "pgctrl" (/proc/net/pktgen/pgctrl)"""
         pgctrl = "/proc/net/pktgen/pgctrl"
         if cmd not in ["start", "stop", "reset"]:
@@ -155,10 +166,23 @@ class Pktgen:
 
     def pg_set(self, dev, flag) -> None:
         """pg_set control setup of individual devices"""
+        if dev.find(self.pgdev) < 0:
+            print("device not match")
+            sys.exit(1)
         pgdev = "/proc/net/pktgen/%s" % dev
         open_write_error(pgdev, flag)
 
-    def pg_thread(self, thread, cmd) -> None:
+    def __pg_get_devpath(self, index) -> str:
+        """ get dev path for thread index"""
+        if self.queue is True:
+            dev = "%s@%d" % (self.pgdev, self.cpu_list[index])
+        else:
+            dev = "%s@%d" % (self.pgdev, index)
+        devpath = "/proc/net/pktgen/%s" % dev
+        return devpath
+
+    @staticmethod
+    def pg_thread(thread, cmd) -> None:
         """pg_thread() control the kernel threads and binding to devices """
         pgthread = "/proc/net/pktgen/kpktgend_%d" % thread
         if cmd != "rem_device_all" and cmd.find("add_device") != 0:
@@ -166,31 +190,55 @@ class Pktgen:
             sys.exit(1)
         open_write_error(pgthread, cmd, "w")
 
-    # pktgen is supported on Linux only
-    def os_check(self) -> bool:
+    @staticmethod
+    def os_check() -> bool:
         """ check if os is linux """
         return os.name == "posix"
 
-    def config_irq_affinity(self, irq, thread):
+    def __config_irq_affinity(self, irq, thread):
         """ config irq affinity """
         irq_path = "/proc/irq/%d/smp_affinity_list" % irq
         open_write_error(irq_path, thread)
         if self.debug is True:
             print("irq %d is set affinity to %d" % (irq, thread))
 
+    def __config_tos(self, dev) -> None:
+        """config tos """
+        if self.tos is not None and self.tos != 0:
+            if self.ipv6 is True:
+                self.pg_set(dev, "traffic_class %x" % self.tos)
+            else:
+                self.pg_set(dev, "tos %s" % self.tos)
+
+    def __config_udp_portrange(self, dev) -> None:
+        """config udp port range """
+        if self.dst_port_max is not None:
+            # Single destination port or random port range
+            self.pg_set(dev, "flag UDPDST_RND")
+            self.pg_set(dev, "udp_dst_min %d" % (self.dst_port_min))
+            self.pg_set(dev, "udp_dst_max %d" % (self.dst_port_max))
+
+        if self.csum is True:
+            self.pg_set(dev, "flag UDPCSUM")
+
+        # Setup random UDP port src range
+        udp_src_min = 9
+        udp_src_max = 1009
+        self.pg_set(dev, "flag UDPSRC_RND")
+        self.pg_set(dev, "udp_src_min %d" % (udp_src_min))
+        self.pg_set(dev, "udp_src_max %d" % (udp_src_max))
+
     def config_queue(self) -> None:
         """configure queues for pktgen"""
         # General cleanup everything since last run
-        if self.append is False:
-            self.reset()
+        self.reset()
 
         # Threads are specified with parameter -t value in $THREADS
         for i in range(self.first_thread, self.first_thread + self.threads):
             if self.queue is True:
-                thr = self.cpu_list[i]
-                dev = "%s@%d" % (self.pgdev, thr)
+                dev = "%s@%d" % (self.pgdev, self.cpu_list[i])
                 irq = self.irq_list[i - self.first_thread]
-                self.config_irq_affinity(irq, thr)
+                self.__config_irq_affinity(irq, self.cpu_list[i])
             else:
                 # The device name is extended with @name, using thread id to
                 # make then unique, but any name will do.
@@ -220,11 +268,8 @@ class Pktgen:
             if self.frags is not None and self.frags != 1:
                 self.pg_set(dev, "frags %d" % self.frags)
             self.pg_set(dev, "delay %d" % self.tx_delay)
-            if self.tos is not None and self.tos != 0:
-                if self.ipv6 is True:
-                    self.pg_set(dev, "traffic_class %x" % self.tos)
-                else:
-                    self.pg_set(dev, "tos %s" % self.tos)
+
+            self.__config_tos(dev)
 
             # Flag example disabling timestamping
             self.pg_set(dev, "flag NO_TIMESTAMP")
@@ -238,21 +283,7 @@ class Pktgen:
                 self.pg_set(dev, "dst_min %s" % (self.dst_ip_min))
                 self.pg_set(dev, "dst_max %s" % (self.dst_ip_max))
 
-            if self.dst_port_max is not None:
-                # Single destination port or random port range
-                self.pg_set(dev, "flag UDPDST_RND")
-                self.pg_set(dev, "udp_dst_min %d" % (self.dst_port_min))
-                self.pg_set(dev, "udp_dst_max %d" % (self.dst_port_max))
-
-            if self.csum is True:
-                self.pg_set(dev, "flag UDPCSUM")
-
-            # Setup random UDP port src range
-            udp_src_min = 9
-            udp_src_max = 1009
-            self.pg_set(dev, "flag UDPSRC_RND")
-            self.pg_set(dev, "udp_src_min %d" % (udp_src_min))
-            self.pg_set(dev, "udp_src_max %d" % (udp_src_max))
+            self.__config_udp_portrange(dev)
 
             # hw burst
             if self.burst is not None and self.burst > 0:
@@ -266,7 +297,8 @@ class Pktgen:
 
     def reset(self) -> None:
         """ reset pktgen"""
-        self.pg_ctrl("reset")
+        if self.append is False:
+            self.pg_ctrl("reset")
 
     def start(self) -> None:
         """start pktgen"""
@@ -276,6 +308,56 @@ class Pktgen:
     def stop(self) -> None:
         """stop pktgen"""
         self.pg_ctrl("stop")
+
+    @staticmethod
+    def result_last(core_id, fp_dev, print_cb):
+        """print last result """
+        tpkts = 0
+        tpps = 0
+        tbps = 0
+        tbps = 0
+        stats_content = fp_dev.read()
+        result_field = re.compile(
+            r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
+        throughput_field = re.compile(
+            r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
+        unresult_field = re.compile(r'Result: (\w+)')
+        res = result_field.search(stats_content)
+        pkt = throughput_field.search(stats_content)
+        if res is not None and pkt is not None:
+            tpkts = int(res.group(2))
+            tpps = int(pkt.group(1))
+            tbps = int(pkt.group(2))
+            tbps = int(pkt.group(3))
+            print_cb("Core%3d send %18d pkts: %18d pps %18d bps %6d errors" %
+                     (core_id, int(res.group(2)), int(
+                         pkt.group(1)), int(pkt.group(2)), int(pkt.group(3))))
+        else:
+            other = unresult_field.search(stats_content)
+            if other is not None:
+                print_cb("Core%3d %s" % (core_id, other.group(1)))
+        return tpkts, tpps, tbps, tbps
+
+    def result_transient(self, need_init, core_id, fp_dev, print_cb):
+        """print result during """
+        stats_content = fp_dev.read()
+        sofar_field = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
+        time_field = re.compile(r'started: (\d+)us  stopped: (\d+)us')
+        sofar = sofar_field.search(stats_content)
+        tim = time_field.search(stats_content)
+        if need_init is True:
+            pkt_sar = PktSar(int(tim.group(1)), self.pkt_size)
+            self.stats.append(pkt_sar)
+        else:
+            pkt_sar = self.stats[core_id - self.first_thread]
+        if sofar is not None:
+            pkt_sar.update(int(sofar.group(1)), int(tim.group(2)))
+            pps, bps = pkt_sar.get_stats()
+            print_cb(
+                "Core%3d send %18d pkts: %18f pps %18f bps %6d errors" %
+                (core_id, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
+            return int(sofar.group(1)), pps, bps, int(sofar.group(2))
+        return 0, 0, 0, 0
 
     def result(self, last, print_cb) -> None:
         """ Print results """
@@ -289,55 +371,22 @@ class Pktgen:
         if len(self.stats) == 0:
             need_init = True
         for i in range(self.first_thread, self.first_thread + self.threads):
-            if self.queue is True:
-                thr = self.cpu_list[i]
-                dev = "%s@%d" % (self.pgdev, thr)
-            else:
-                dev = "%s@%d" % (self.pgdev, i)
-            devpath = "/proc/net/pktgen/%s" % dev
-            with open(devpath, "r") as fp_dev:
-                stats_content = fp_dev.read()
-            if last is False:
-                sofar_field = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
-                time_field = re.compile(r'started: (\d+)us  stopped: (\d+)us')
-                sofar = sofar_field.search(stats_content)
-                tim = time_field.search(stats_content)
-                if need_init is True:
-                    pkt_sar = PktSar(int(tim.group(1)), self.pkt_size)
-                    self.stats.append(pkt_sar)
+            with open(self.__pg_get_devpath(i), "r") as fp_dev:
+                if last is False:
+                    sg_pkts, sg_pps, sg_bps, sg_err = self.result_transient(
+                        need_init, i, fp_dev, print_cb)
                 else:
-                    pkt_sar = self.stats[i - self.first_thread]
-                if sofar is not None:
-                    pkt_sar.update(int(sofar.group(1)), int(tim.group(2)))
-                    pps, bps = pkt_sar.get_stats()
-                    total_pkts += int(sofar.group(1))
-                    total_pps += pps
-                    total_bps += bps
-                    total_err += int(sofar.group(2))
-                    print_cb("Core%3d send %18d pkts: %18f pps %18f bps %6d errors" %
-                             (i, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
-            else:
-                result_field = re.compile(r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
-                throughput_field = re.compile(r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
-                unresult_field = re.compile(r'Result: (\w+)')
-                res = result_field.search(stats_content)
-                pkt = throughput_field.search(stats_content)
-                other = unresult_field.search(stats_content)
-                if res is not None and pkt is not None:
-                    total_pkts += int(res.group(2))
-                    total_pps += int(pkt.group(1))
-                    total_bps += int(pkt.group(2))
-                    total_err += int(pkt.group(3))
-                    print_cb("Core%3d send %18d pkts: %18d pps %18d bps %6d errors" %
-                             (i, int(res.group(2)), int(pkt.group(1)),
-                              int(pkt.group(2)), int(pkt.group(3))))
-                elif other is not None:
-                    print_cb("Core%3d %s" % (i, other.group(1)))
+                    sg_pkts, sg_pps, sg_bps, sg_err = self.result_last(
+                        i, fp_dev, print_cb)
+                total_pkts += sg_pkts
+                total_pps += sg_pps
+                total_bps += sg_bps
+                total_err += sg_err
         print_cb("Total   send %18d pkts: %18d pps %18d bps %6d errors" %
                  (total_pkts, total_pps, total_bps, total_err))
 
-    def get_dev_numa(self) -> int:
-        """ get_dev_numa returns the numa node of the device"""
+    def __get_dev_numa(self) -> int:
+        """ __get_dev_numa returns the numa node of the device"""
         numa_path = "/sys/class/net/%s/device/numa_node" % self.pgdev
         try:
             with open(numa_path, "r") as fp_numa:
@@ -349,8 +398,9 @@ class Pktgen:
             return 0
         return int(node)
 
-    def node_cpu_list(self, node) -> list:
-        """ node_cpu_list returns the cpu list of the node """
+    @staticmethod
+    def __node_cpu_list(node) -> list:
+        """ __node_cpu_list returns the cpu list of the node """
         cpu_list = "/sys/devices/system/node/node%d/cpulist" % node
         try:
             with open(cpu_list, 'r') as fp_cpu:
@@ -366,7 +416,7 @@ class Pktgen:
                 ret.append(j)
         return ret
 
-    def get_irqs(self):
+    def __get_irqs(self):
         """ read out irqs """
         proc_intr = "/proc/interrupts"
         msi_irqs = "/sys/class/net/%s/device/msi_irqs" % self.pgdev
@@ -376,14 +426,16 @@ class Pktgen:
         except IOError:
             return []
         irqs = []
-        devq_irq = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+' % (self.pgdev))
+        devq_irq = re.compile(
+            r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+' % (self.pgdev))
         match = devq_irq.finditer(intrs)
         print(match)
         if len(devq_irq.findall(intrs)) > 0:
             for i in match:
                 irqs.append(int(i.group(1)))
             return irqs
-        dev_irq = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-\d+' % (self.pgdev))
+        dev_irq = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-\d+' %
+                             (self.pgdev))
         match = dev_irq.finditer(intrs)
         if len(dev_irq.findall(intrs)) > 0:
             for i in match:

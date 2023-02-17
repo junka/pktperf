@@ -2,7 +2,7 @@
 pktgen is very useful for network performance test, especially when we don't have 
 multiple nics for dpdk. And for ```vm2vm``` test, it would be easy to use for end-user.
 
-Pktperf is a very thin layer for pktgen (the kernel version).
+Pktperf is scripts repacked for pktgen (the kernel version).
 
 It makes use of the sample scripts in linux kernel [https://github.com/torvalds/linux/tree/master/samples/pktgen]
 

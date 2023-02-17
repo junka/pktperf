@@ -8,37 +8,12 @@ import argparse
 from .pktgen import Pktgen
 
 
-def parse_options(args):
-    """ opt_cli parse args and init the pktgen """
-    pktgen = Pktgen(args.interface, args.size, args.dest, args.mac,
-                    args.portrange, args.txcsum, args.threads,
-                    args.firstthread, args.clone, args.num, args.burst,
-                    args.verbose, args.debug, args.ipv6, args.flows,
-                    args.flowpkt, args.delay, args.append, args.queuemap,
-                    args.tos, args.bps, args.pps, args.frags)
-
-    event = Event()
-    tui = Thread(target=ui_func, name="ui", args=(pktgen, event,), daemon=False)
-
-    def sig_exit(_sig, _frame):
-        event.set()
-        tui.join()
-        pktgen.result(True, print)
-        sys.exit(0)
-
-    signal.signal(signal.SIGINT, sig_exit)
-    pktgen.config_queue()
-    tui.start()
-    pktgen.start()
-
-
 def ui_func(pktgen, event):
     """ ui_func prints out statistics """
     while not event.is_set():
         print("")
         pktgen.result(False, print)
         time.sleep(1)
-
 
 parser = argparse.ArgumentParser(description="pktgen python scripts")
 parser.add_argument('-i', '--interface', help="output interface/device",
@@ -87,12 +62,24 @@ parser.add_argument('-y', '--pps', help="pps rate limit per thread",
 parser.add_argument('-e', '--frags', help="frags number in skb_shared_info",
                     required=False)
 
-
 def main():
     """ main function entry """
-    pargs = parser.parse_args()
-    parse_options(pargs)
+    args = parser.parse_args()
+    pktgen = Pktgen(args)
 
+    event = Event()
+    tui = Thread(target=ui_func, name="ui", args=(pktgen, event,), daemon=False)
+
+    def sig_exit(_sig, _frame):
+        event.set()
+        tui.join()
+        pktgen.result(True, print)
+        sys.exit(0)
+
+    signal.signal(signal.SIGINT, sig_exit)
+    pktgen.config_queue()
+    tui.start()
+    pktgen.start()
 
 if __name__ == "__main__":
     main()
