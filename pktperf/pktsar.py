@@ -1,3 +1,4 @@
+# -*- coding: UTF-8 -*-
 """
 classes provide for stats update
 """
@@ -9,6 +10,7 @@ class PktSar:
 
     calculate the pps and bps from the text
     """
+
     def __init__(self, start_time: int, pkt_size: int) -> None:
         """ init sar stats """
         self.start = start_time
@@ -23,7 +25,7 @@ class PktSar:
         """ update stats """
         diff_pkts = pkts_so_far - self._pkts
         self._pkts = pkts_so_far
-        diff_time = ((timestamp - self.last_update)/1000000)
+        diff_time = (timestamp - self.last_update) / 1000000
         if diff_time != 0:
             self.last_update = timestamp
             if timestamp == self.start:

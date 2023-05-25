@@ -1,3 +1,4 @@
+# -*- coding: UTF-8 -*-
 """
 classes provide functions for pktgen operation
 """
@@ -260,7 +261,7 @@ class Pktgen:
 
             # select queue and bind the queue and $dev in 1:1 relationship
             if self.queue is True:
-                qid = (i - self.first_thread)
+                qid = i - self.first_thread
                 if self.debug is True:
                     print("queue number is %d" % (qid))
                 self.pg_set(dev, "queue_map_min %d" % qid)
