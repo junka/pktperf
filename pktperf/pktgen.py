@@ -47,7 +47,7 @@ class Pktgen:
             burst: hw level bursting of skbs
             verbose: verbose
             debug: debug
-            ip6: send IPv6 packets
+            ipv6: send IPv6 packets
             flows: limit number of flows
             flow_len: packets number a flow will send
             tx_delay: tx delay value in ns
@@ -68,7 +68,7 @@ class Pktgen:
         self.pgdev = args.interface
         self.pkt_size = int(args.size)
         self.dst_mac = args.mac
-        self.__init_ip_dst(args.ip6, args.dest)
+        self.__init_ip_dst(args.ipv6, args.dest)
         self.__init_port_range(args.portrange)
         self.frags = None
         self.csum = args.txcsum
@@ -83,15 +83,15 @@ class Pktgen:
         if args.threads is not None:
             self.threads = int(args.threads)
         self.stats = []
-        if args.first_thread is not None:
-            self.first_thread = int(args.first_thread)
+        if args.firstthread is not None:
+            self.first_thread = int(args.firstthread)
         if args.delay is not None:
             self.tx_delay = int(args.delay)
         if args.flows is not None:
             self.flows = int(args.flows)
         if args.flowpkt is not None:
             self.flow_len = int(args.flowpkt)
-        self.__init_irq(args.queue_map)
+        self.__init_irq(args.queuemap)
         if args.tos is not None:
             self.tos = int(args.tos)
         self.bps_rate = args.bps
@@ -101,10 +101,10 @@ class Pktgen:
         self.vlan = args.vlan
         self.svlan = args.svlan
 
-    def __init_ip_dst(self, is_ipv6, dest):
+    def __init_ip_dst(self, is_ipv6, dest_ip):
         """ Init pktgen module ip dst """
         self.ipv6 = is_ipv6
-        if dest is None:
+        if dest_ip is None:
             if self.ipv6 is True:
                 dest_ip = "FD00::1"
             else:
