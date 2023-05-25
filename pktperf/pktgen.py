@@ -101,6 +101,12 @@ class Pktgen:
             self.frags = int(args.frags)
         self.vlan = args.vlan
         self.svlan = args.svlan
+        self.tun_vni = args.vni
+        self.tun_udpport = args.tundport
+        self.tun_dst = args.tundst
+        self.tun_src = args.tunsrc
+        self.inner_dmac = args.innerdmac
+        self.inner_smac = args.innersmac
 
     def __init_ip_dst(self, is_ipv6, dest_ip):
         """ Init pktgen module ip dst """
@@ -238,6 +244,27 @@ class Pktgen:
         self.pg_set(dev, "udp_src_min %d" % (udp_src_min))
         self.pg_set(dev, "udp_src_max %d" % (udp_src_max))
 
+    def __config_ip_dst(self, dev) -> None:
+        # Destination
+        if self.ipv6 is True:
+            self.pg_set(dev, "dst_min6 %s" % (self.dst_ip_min))
+            self.pg_set(dev, "dst_max6 %s" % (self.dst_ip_max))
+        else:
+            self.pg_set(dev, "dst_min %s" % (self.dst_ip_min))
+            self.pg_set(dev, "dst_max %s" % (self.dst_ip_max))
+
+    def __config_tun_meta(self, dev) -> None:
+        if self.tun_vni is not None or self.tun_udpport is not None:
+            self.pg_set(dev, "vxlan_vni %d" % self.tun_vni)
+            self.pg_set(dev, "tun_udp_dst %d" % self.tun_udpport)
+
+            self.pg_set(dev, "tun_src_min %s" % self.tun_src)
+            self.pg_set(dev, "tun_src_max %s" % self.tun_src)
+            self.pg_set(dev, "tun_dst_min %s" % self.tun_dst)
+            self.pg_set(dev, "tun_dst_max %s" % self.tun_dst)
+            self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
+            self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
+
     def config_queue(self) -> None:
         """configure queues for pktgen"""
         # General cleanup everything since last run
@@ -284,15 +311,9 @@ class Pktgen:
             # Flag example disabling timestamping
             self.pg_set(dev, "flag NO_TIMESTAMP")
 
-            # Destination
+            self.__config_tun_meta(dev)
             self.pg_set(dev, "dst_mac %s" % (self.dst_mac))
-            if self.ipv6 is True:
-                self.pg_set(dev, "dst_min6 %s" % (self.dst_ip_min))
-                self.pg_set(dev, "dst_max6 %s" % (self.dst_ip_max))
-            else:
-                self.pg_set(dev, "dst_min %s" % (self.dst_ip_min))
-                self.pg_set(dev, "dst_max %s" % (self.dst_ip_max))
-
+            self.__config_ip_dst(dev)
             self.__config_udp_portrange(dev)
             self.__config_vlan(dev)
 

@@ -90,8 +90,7 @@ parser.add_argument('-w',
                     help="Tx Delay value (ns)",
                     default=0,
                     required=False)
-parser.add_argument('-a',
-                    '--append',
+parser.add_argument('--append',
                     help="Script will not reset generator's"
                     "state, but will append its config",
                     required=False,
@@ -102,8 +101,7 @@ parser.add_argument('-q',
                     required=False,
                     action="store_true")
 parser.add_argument('--tos',
-                    help="tos for IPv4 or traffic class for"
-                    " IPv6 traffic",
+                    help="tos for IPv4 or traffic class for IPv6 traffic",
                     default=0,
                     required=False)
 parser.add_argument('-r',
@@ -114,12 +112,17 @@ parser.add_argument('-y',
                     '--pps',
                     help="pps rate limit per thread",
                     required=False)
-parser.add_argument('-e',
-                    '--frags',
+parser.add_argument('--frags',
                     help="frags number in skb_shared_info",
                     required=False)
 parser.add_argument('--vlan', help="vlan id 0-4095", required=False)
 parser.add_argument('--svlan', help="svlan id 0-4095", required=False)
+parser.add_argument('--vni', help="vxlan vni", required=False)
+parser.add_argument('--tundport', help="vxlan udp port", required=False)
+parser.add_argument('--tundst', help="tunnel outer ip dst", required=False)
+parser.add_argument('--tunsrc', help="tunnerl outer ip dst", required=False)
+parser.add_argument('--innerdmac', help="inner dst mac", required=False)
+parser.add_argument('--innersmac', help="inner src mac", required=False)
 
 
 def main():
