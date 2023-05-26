@@ -1,20 +1,28 @@
-[tool.poetry]
+[build-system]
+requires = ["setuptools>=60.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
 name = "pktperf"
 version = "0.4.1"
+authors = [
+  { name="junka", email="wan.junjie@foxmail.com" },
+]
 description = "pktgen scripts tool"
-authors = ["junka <wan.junjie@foxmail.com>"]
-license = "BSD"
-repository = "https://github.com/junka/pktperf"
+readme = "README.md"
+requires-python = ">=3.5"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: BSD License",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = [
+    "ipaddress",
+]
 
-[tool.poetry.dependencies]
-python = "^3.5"
+[project.scripts]
+pktperf = "pktperf.pktperf:main"
 
-[tool.poetry.dev-dependencies]
-
-
-[tool.poetry.scripts]
-pktperf = 'pktperf.pktperf:main'
-
-[build-system]
-requires = ["setuptools>=42"]
-build-backend = "setuptools.build_meta"
+[project.urls]
+"Homepage" = "https://github.com/junka/pktperf"
+"Bug Tracker" = "https://github.com/junka/pktperf/issues"
