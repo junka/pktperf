@@ -118,9 +118,9 @@ parser.add_argument('--frags',
 parser.add_argument('--vlan', help="vlan id 0-4095", required=False)
 parser.add_argument('--svlan', help="svlan id 0-4095", required=False)
 parser.add_argument('--vni', help="vxlan vni", required=False)
-parser.add_argument('--tundport', help="vxlan udp port", required=False)
+parser.add_argument('--tundport', help="vxlan udp port", required=False, default=4789)
 parser.add_argument('--tundst', help="tunnel outer ip dst", required=False)
-parser.add_argument('--tunsrc', help="tunnerl outer ip dst", required=False)
+parser.add_argument('--tunsrc', help="tunnerl outer ip src", required=False)
 parser.add_argument('--innerdmac', help="inner dst mac", required=False)
 parser.add_argument('--innersmac', help="inner src mac", required=False)
 

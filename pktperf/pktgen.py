@@ -54,6 +54,8 @@ class Pktgen:
             tx_delay: tx delay value in ns
             append: script will not reset generator state, append its config
             queue: queue mapping with irq affinity
+
+            tos, traffic_class, vni should be hex for pktgen
         """
         if self.os_check() is False:
             print("pktperf Can Only run in Linux system!")
@@ -69,8 +71,8 @@ class Pktgen:
         self.pgdev = args.interface
         self.pkt_size = int(args.size)
         self.dst_mac = args.mac
-        self.__init_ip_dst(args.ipv6, args.dest)
-        self.__init_port_range(args.portrange)
+        self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(args.ipv6, args.dest)
+        self.dst_port_min, self.dst_port_max = self.__init_port_range(args.portrange)
         self.frags = None
         self.csum = args.txcsum
         self.debug = args.debug
@@ -103,55 +105,54 @@ class Pktgen:
         self.svlan = args.svlan
         self.tun_vni = args.vni
         self.tun_udpport = args.tundport
-        self.tun_dst = args.tundst
-        self.tun_src = args.tunsrc
+        self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(args.ipv6, args.tundst)
+        self.tun_src_min, self.tun_src_max = self.__init_ip_input(args.ipv6, args.tunsrc)
         self.inner_dmac = args.innerdmac
         self.inner_smac = args.innersmac
 
-    def __init_ip_dst(self, is_ipv6, dest_ip):
+    def __init_ip_input(self, is_ipv6, ipstr) -> (str, str):
         """ Init pktgen module ip dst """
         self.ipv6 = is_ipv6
-        if dest_ip is None:
-            if self.ipv6 is True:
-                dest_ip = "FD00::1"
-            else:
-                dest_ip = "198.18.0.42"
+        if ipstr is None:
+            return "", ""
         net = None
         try:
-            net = ipaddress.ip_network(dest_ip, strict=False)
+            net = ipaddress.ip_network(ipstr, strict=False)
         except (ValueError, TypeError):
-            ip_list = dest_ip.split('-')
+            ip_list = ipstr.split('-')
             try:
-                self.dst_ip_min = ipaddress.ip_address(ip_list[0])
+                ip_min = ipaddress.ip_address(ip_list[0])
             except (ValueError, TypeError):
                 print("invalid ip address format")
                 sys.exit()
             if len(ip_list) == 2:
                 try:
-                    self.dst_ip_max = ipaddress.ip_address(ip_list[1])
+                    ip_max = ipaddress.ip_address(ip_list[1])
                 except (ValueError, TypeError):
                     print("invalid ip address format")
                     sys.exit()
             elif len(ip_list) == 1:
-                self.dst_ip_max = self.dst_ip_min
+                ip_max = ip_min
         if net is not None:
             ip_list = list(net)
             if ip_list[0].version == 6:
                 self.ipv6 = True
-            self.dst_ip_min = ip_list[0]
-            self.dst_ip_max = ip_list[-1]
+            ip_min = ip_list[0]
+            ip_max = ip_list[-1]
+        return ip_min, ip_max
 
-    def __init_port_range(self, portrange) -> None:
+    def __init_port_range(self, portrange) -> (int, int):
         """init port range for pktgen"""
-        self.dst_port_max = None
-        self.dst_port_min = None
+        port_max = 65535
+        port_min = 65535
         if portrange is not None:
             ports = portrange.split('-')
             if len(ports) == 2:
-                self.dst_port_max = int(ports[1])
+                port_max = int(ports[1])
             elif len(ports) == 1:
-                self.dst_port_max = int(ports[0])
-            self.dst_port_min = int(ports[0])
+                port_max = int(ports[0])
+            port_min = int(ports[0])
+        return port_min, port_max
 
     def __init_irq(self, queuemap) -> None:
         """init irq affinity if queue mapping enabled"""
@@ -215,9 +216,9 @@ class Pktgen:
         """config tos """
         if self.tos is not None and self.tos != 0:
             if self.ipv6 is True:
-                self.pg_set(dev, "traffic_class %x" % self.tos)
+                self.pg_set(dev, "traffic_class %0x" % self.tos)
             else:
-                self.pg_set(dev, "tos %s" % self.tos)
+                self.pg_set(dev, "tos %0x" % self.tos)
 
     def __config_vlan(self, dev) -> None:
         """config vlan related parameter """
@@ -254,16 +255,19 @@ class Pktgen:
             self.pg_set(dev, "dst_max %s" % (self.dst_ip_max))
 
     def __config_tun_meta(self, dev) -> None:
-        if self.tun_vni is not None or self.tun_udpport is not None:
-            self.pg_set(dev, "vxlan_vni %d" % self.tun_vni)
-            self.pg_set(dev, "tun_udp_dst %d" % self.tun_udpport)
-
-            self.pg_set(dev, "tun_src_min %s" % self.tun_src)
-            self.pg_set(dev, "tun_src_max %s" % self.tun_src)
-            self.pg_set(dev, "tun_dst_min %s" % self.tun_dst)
-            self.pg_set(dev, "tun_dst_max %s" % self.tun_dst)
-            self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
-            self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
+        if self.tun_vni is not None:
+            self.pg_set(dev, "tun_meta %06x" % int(self.tun_vni))
+            self.pg_set(dev, "tun_udp_dst %d" % int(self.tun_udpport))
+            if self.tun_src_min != "":
+                self.pg_set(dev, "tun_src_min %s" % self.tun_src_min)
+            if self.tun_src_max != "":
+                self.pg_set(dev, "tun_src_max %s" % self.tun_src_max)
+            if self.tun_dst_min != "":
+                self.pg_set(dev, "tun_dst_min %s" % self.tun_dst_min)
+            if self.tun_dst_max != "":
+                self.pg_set(dev, "tun_dst_max %s" % self.tun_dst_max)
+            # self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
+            # self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
 
     def config_queue(self) -> None:
         """configure queues for pktgen"""
