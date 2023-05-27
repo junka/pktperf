@@ -170,11 +170,31 @@
 #include <linux/uaccess.h>
 #include <asm/dma.h>
 #include <asm/div64.h>		/* do_div */
+#include <linux/version.h>
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
+#define PRANDOM32_INCLUSIVE(a, b) (prandom_u32() % (b - a) + a)
+#define PRANDOM32_BELOW(v) (prandom_u32() % v)
+#define PRANDOM32() prandom_u32()
+#else
+#define PRANDOM32_INCLUSIVE(a, b) get_random_u32_inclusive(a, b)
+#define PRANDOM32_BELOW(v) get_random_u32_below(v)
+#define PRANDOM32() get_random_u32()
+#endif
+
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 6, 0)
+typedef struct file_operations fops_t;
+#else
+typedef struct proc_ops fops_t;
+#endif
 
 #define VERSION	"3.0"
 #define IP_NAME_SZ 32
 #define MAX_MPLS_LABELS 16 /* This is the max label stack depth */
 #define MPLS_STACK_BOTTOM htonl(0x00000100)
+/* Max number of internet mix entries that can be specified in imix_weights. */
+#define MAX_IMIX_ENTRIES 20
+#define IMIX_PRECISION 100 /* Precision of IMIX distribution */
 
 #define func_enter() pr_debug("entering %s\n", __func__);
 
@@ -206,9 +226,9 @@
 
 
 #define pf(flag)		flag##_SHIFT,
-enum pkt_flags {
-	PKT_FLAGS
-};
+    enum pkt_flags {
+      PKT_FLAGS
+    };
 #undef pf
 
 /* Device flag bits */
@@ -254,6 +274,12 @@ static char *pkt_flag_names[] = {
 struct vxlanhdr {
 	__u32 vx_flags;
 	__u32 vx_vni;
+};
+
+struct imix_pkt {
+	u64 size;
+	u64 weight;
+	u64 count_so_far;
 };
 
 struct flow_state {
@@ -383,6 +409,12 @@ struct pktgen_dev {
 				are for dscp codepoint */
 	__u8 traffic_class;  /* ditto for the (former) Traffic Class in IPv6
 				(see RFC 3260, sec. 4) */
+
+	/* IMIX */
+	unsigned int n_imix_entries;
+	struct imix_pkt imix_entries[MAX_IMIX_ENTRIES];
+	/* Maps 0-IMIX_PRECISION range to imix_entry based on probability*/
+	__u8 imix_distribution[IMIX_PRECISION];
 
 	/* MPLS */
 	unsigned int nr_labels;	/* Depth of stack, 0 = no MPLS */
@@ -515,6 +547,7 @@ static void pktgen_stop_all_threads_ifs(struct pktgen_net *pn);
 
 static void pktgen_stop(struct pktgen_thread *t);
 static void pktgen_clear_counters(struct pktgen_dev *pkt_dev);
+static void fill_imix_distribution(struct pktgen_dev *pkt_dev);
 
 /* Module parameters, defaults. */
 static int pg_count_d __read_mostly = 1000;
@@ -580,7 +613,7 @@ static int pgctrl_open(struct inode *inode, struct file *file)
 	return single_open(file, pgctrl_show, PDE_DATA(inode));
 }
 
-static const struct file_operations pktgen_fops = {
+static const fops_t pktgen_fops = {
 	.open    = pgctrl_open,
 	.read    = seq_read,
 	.llseek  = seq_lseek,
@@ -599,6 +632,16 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 		   "Params: count %llu  min_pkt_size: %u  max_pkt_size: %u\n",
 		   (unsigned long long)pkt_dev->count, pkt_dev->min_pkt_size,
 		   pkt_dev->max_pkt_size);
+
+	if (pkt_dev->n_imix_entries > 0) {
+		seq_puts(seq, "     imix_weights: ");
+		for (i = 0; i < pkt_dev->n_imix_entries; i++) {
+			seq_printf(seq, "%llu,%llu ",
+				   pkt_dev->imix_entries[i].size,
+				   pkt_dev->imix_entries[i].weight);
+		}
+		seq_puts(seq, "\n");
+	}
 
 	seq_printf(seq,
 		   "     frags: %d  delay: %llu  clone_skb: %d  ifname: %s\n",
@@ -732,6 +775,18 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 		   (unsigned long long)pkt_dev->sofar,
 		   (unsigned long long)pkt_dev->errors);
 
+    if (pkt_dev->n_imix_entries > 0) {
+        int i;
+
+        seq_puts(seq, "     imix_size_counts: ");
+        for (i = 0; i < pkt_dev->n_imix_entries; i++) {
+            seq_printf(seq, "%llu,%llu ",
+                   pkt_dev->imix_entries[i].size,
+                   pkt_dev->imix_entries[i].count_so_far);
+        }
+        seq_puts(seq, "\n");
+    }
+
 	seq_printf(seq,
 		   "     started: %lluus  stopped: %lluus idle: %lluus\n",
 		   (unsigned long long) ktime_to_us(pkt_dev->started_at),
@@ -862,6 +917,63 @@ static int strn_len(const char __user * user_buffer, unsigned int maxlen)
 	}
 done_str:
 	return i;
+}
+
+
+/* Parses imix entries from user buffer.
+ * The user buffer should consist of imix entries separated by spaces
+ * where each entry consists of size and weight delimited by commas.
+ * "size1,weight_1 size2,weight_2 ... size_n,weight_n" for example.
+ */
+static ssize_t get_imix_entries(const char __user *buffer,
+                struct pktgen_dev *pkt_dev)
+{
+    const int max_digits = 10;
+    int i = 0;
+    long len;
+    char c;
+
+    pkt_dev->n_imix_entries = 0;
+
+    do {
+        unsigned long weight;
+        unsigned long size;
+
+        len = num_arg(&buffer[i], max_digits, &size);
+        if (len < 0)
+            return len;
+        i += len;
+        if (get_user(c, &buffer[i]))
+            return -EFAULT;
+        /* Check for comma between size_i and weight_i */
+        if (c != ',')
+            return -EINVAL;
+        i++;
+
+        if (size < 14 + 20 + 8)
+            size = 14 + 20 + 8;
+
+        len = num_arg(&buffer[i], max_digits, &weight);
+        if (len < 0)
+            return len;
+        if (weight <= 0)
+            return -EINVAL;
+
+        pkt_dev->imix_entries[pkt_dev->n_imix_entries].size = size;
+        pkt_dev->imix_entries[pkt_dev->n_imix_entries].weight = weight;
+
+        i += len;
+        if (get_user(c, &buffer[i]))
+            return -EFAULT;
+
+        i++;
+        pkt_dev->n_imix_entries++;
+
+        if (pkt_dev->n_imix_entries > MAX_IMIX_ENTRIES)
+            return -E2BIG;
+    } while (c == ' ');
+
+    return i;
 }
 
 static ssize_t get_labels(const char __user *buffer, struct pktgen_dev *pkt_dev)
@@ -1032,6 +1144,20 @@ static ssize_t pktgen_if_write(struct file *file,
 		return count;
 	}
 
+    if (!strcmp(name, "imix_weights")) {
+        if (pkt_dev->clone_skb > 0)
+            return -EINVAL;
+
+        len = get_imix_entries(&user_buffer[i], pkt_dev);
+        if (len < 0)
+            return len;
+
+        fill_imix_distribution(pkt_dev);
+
+        i += len;
+        return count;
+    }
+
 	if (!strcmp(name, "debug")) {
 		len = num_arg(&user_buffer[i], 10, &value);
 		if (len < 0)
@@ -1154,10 +1280,16 @@ static ssize_t pktgen_if_write(struct file *file,
 		len = num_arg(&user_buffer[i], 10, &value);
 		if (len < 0)
 			return len;
+        /* clone_skb is not supported for netif_receive xmit_mode and
+         * IMIX mode.
+         */
 		if ((value > 0) &&
 		    ((pkt_dev->xmit_mode == M_NETIF_RECEIVE) ||
 		     !(pkt_dev->odev->priv_flags & IFF_TX_SKB_SHARING)))
 			return -ENOTSUPP;
+        if (value > 0 && pkt_dev->n_imix_entries > 0)
+            return -EINVAL;
+
 		i += len;
 		pkt_dev->clone_skb = value;
 
@@ -1948,12 +2080,12 @@ static int pktgen_if_open(struct inode *inode, struct file *file)
 	return single_open(file, pktgen_if_show, PDE_DATA(inode));
 }
 
-static const struct file_operations pktgen_if_fops = {
-	.open    = pktgen_if_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.write   = pktgen_if_write,
-	.release = single_release,
+static const fops_t pktgen_if_fops = {
+    .open = pktgen_if_open,
+    .read = seq_read,
+    .llseek = seq_lseek,
+    .write = pktgen_if_write,
+    .release = single_release,
 };
 
 static int pktgen_thread_show(struct seq_file *seq, void *v)
@@ -2085,12 +2217,12 @@ static int pktgen_thread_open(struct inode *inode, struct file *file)
 	return single_open(file, pktgen_thread_show, PDE_DATA(inode));
 }
 
-static const struct file_operations pktgen_thread_fops = {
-	.open    = pktgen_thread_open,
-	.read    = seq_read,
-	.llseek  = seq_lseek,
-	.write   = pktgen_thread_write,
-	.release = single_release,
+static const fops_t pktgen_thread_fops = {
+    .open = pktgen_thread_open,
+    .read = seq_read,
+    .llseek = seq_lseek,
+    .write = pktgen_thread_write,
+    .release = single_release,
 };
 
 /* Think find or remove for NN */
@@ -2234,6 +2366,7 @@ static int pktgen_setup_dev(const struct pktgen_net *pn,
 
 	/* Clean old setups */
 	if (pkt_dev->odev) {
+
 		dev_put(pkt_dev->odev);
 		pkt_dev->odev = NULL;
 	}
@@ -2483,7 +2616,7 @@ static inline int f_pick(struct pktgen_dev *pkt_dev)
 				pkt_dev->curfl = 0; /*reset */
 		}
 	} else {
-		flow = prandom_u32() % pkt_dev->cflows;
+		flow = PRANDOM32_BELOW(pkt_dev->cflows);
 		pkt_dev->curfl = flow;
 
 		if (pkt_dev->flows[flow].count > pkt_dev->lflow) {
@@ -2539,11 +2672,8 @@ static void set_cur_queue_map(struct pktgen_dev *pkt_dev)
 	else if (pkt_dev->queue_map_min <= pkt_dev->queue_map_max) {
 		__u16 t;
 		if (pkt_dev->flags & F_QUEUE_MAP_RND) {
-			t = prandom_u32() %
-				(pkt_dev->queue_map_max -
-				 pkt_dev->queue_map_min + 1)
-				+ pkt_dev->queue_map_min;
-		} else {
+			t = PRANDOM32_INCLUSIVE(pkt_dev->queue_map_min, pkt_dev->queue_map_max);
+                } else {
 			t = pkt_dev->cur_queue_map + 1;
 			if (t > pkt_dev->queue_map_max)
 				t = pkt_dev->queue_map_min;
@@ -2571,7 +2701,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		__u32 tmp;
 
 		if (pkt_dev->flags & F_MACSRC_RND)
-			mc = prandom_u32() % pkt_dev->src_mac_count;
+			mc = PRANDOM32_BELOW(pkt_dev->src_mac_count);
 		else {
 			mc = pkt_dev->cur_src_mac_offset++;
 			if (pkt_dev->cur_src_mac_offset >=
@@ -2589,7 +2719,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		pkt_dev->hh[8] = tmp;
 		tmp = (pkt_dev->src_mac[1] + (tmp >> 8));
 		pkt_dev->hh[7] = tmp;
-	}
+    }
 
 	/*  Deal with Destination MAC */
 	if (pkt_dev->dst_mac_count > 1) {
@@ -2597,7 +2727,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		__u32 tmp;
 
 		if (pkt_dev->flags & F_MACDST_RND)
-			mc = prandom_u32() % pkt_dev->dst_mac_count;
+			mc = PRANDOM32_BELOW(pkt_dev->dst_mac_count);
 
 		else {
 			mc = pkt_dev->cur_dst_mac_offset++;
@@ -2617,30 +2747,28 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		pkt_dev->hh[2] = tmp;
 		tmp = (pkt_dev->dst_mac[1] + (tmp >> 8));
 		pkt_dev->hh[1] = tmp;
-	}
+        }
 
 	if (pkt_dev->flags & F_MPLS_RND) {
 		unsigned int i;
 		for (i = 0; i < pkt_dev->nr_labels; i++)
 			if (pkt_dev->labels[i] & MPLS_STACK_BOTTOM)
 				pkt_dev->labels[i] = MPLS_STACK_BOTTOM |
-					     ((__force __be32)prandom_u32() &
+					     ((__force __be32)PRANDOM32() &
 						      htonl(0x000fffff));
 	}
 
 	if ((pkt_dev->flags & F_VID_RND) && (pkt_dev->vlan_id != 0xffff)) {
-		pkt_dev->vlan_id = prandom_u32() & (4096 - 1);
+		pkt_dev->vlan_id = PRANDOM32_BELOW(4096);
 	}
 
 	if ((pkt_dev->flags & F_SVID_RND) && (pkt_dev->svlan_id != 0xffff)) {
-		pkt_dev->svlan_id = prandom_u32() & (4096 - 1);
+		pkt_dev->svlan_id = PRANDOM32_BELOW(4096);
 	}
 
 	if (pkt_dev->udp_src_min < pkt_dev->udp_src_max) {
 		if (pkt_dev->flags & F_UDPSRC_RND)
-			pkt_dev->cur_udp_src = prandom_u32() %
-				(pkt_dev->udp_src_max - pkt_dev->udp_src_min)
-				+ pkt_dev->udp_src_min;
+			pkt_dev->cur_udp_src = PRANDOM32_INCLUSIVE(pkt_dev->udp_src_min, pkt_dev->udp_src_max);
 
 		else {
 			pkt_dev->cur_udp_src++;
@@ -2651,9 +2779,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 
 	if (pkt_dev->udp_dst_min < pkt_dev->udp_dst_max) {
 		if (pkt_dev->flags & F_UDPDST_RND) {
-			pkt_dev->cur_udp_dst = prandom_u32() %
-				(pkt_dev->udp_dst_max - pkt_dev->udp_dst_min)
-				+ pkt_dev->udp_dst_min;
+			pkt_dev->cur_udp_dst = PRANDOM32_INCLUSIVE(pkt_dev->udp_dst_min, pkt_dev->udp_dst_max);
 		} else {
 			pkt_dev->cur_udp_dst++;
 			if (pkt_dev->cur_udp_dst >= pkt_dev->udp_dst_max)
@@ -2668,7 +2794,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		if (imn < imx) {
 			__u32 t;
 			if (pkt_dev->flags & F_IPSRC_RND)
-				t = prandom_u32() % (imx - imn) + imn;
+				t = PRANDOM32_INCLUSIVE(imn, imx);
 			else {
 				t = ntohl(pkt_dev->cur_saddr);
 				t++;
@@ -2690,8 +2816,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 				if (pkt_dev->flags & F_IPDST_RND) {
 
 					do {
-						t = prandom_u32() %
-							(imx - imn) + imn;
+						t = PRANDOM32_INCLUSIVE(imn, imx);
 						s = htonl(t);
 					} while (ipv4_is_loopback(s) ||
 						ipv4_is_multicast(s) ||
@@ -2728,7 +2853,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 
 			for (i = 0; i < 4; i++) {
 				pkt_dev->cur_in6_daddr.s6_addr32[i] =
-				    (((__force __be32)prandom_u32() |
+				    (((__force __be32)PRANDOM32() |
 				      pkt_dev->min_in6_daddr.s6_addr32[i]) &
 				     pkt_dev->max_in6_daddr.s6_addr32[i]);
 			}
@@ -2741,7 +2866,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		if (imn < imx) {
 			__u32 t;
 			if (pkt_dev->flags & F_TUNSRC_RND)
-				t = prandom_u32() % (imx - imn) + imn;
+				t = PRANDOM32_INCLUSIVE(imn, imx);
 			else {
 				t = ntohl(pkt_dev->cur_tun_saddr);
 				t++;
@@ -2762,8 +2887,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 				__be32 s;
 				if (pkt_dev->flags & F_TUNDST_RND) {
 					do {
-						t = prandom_u32() %
-							(imx - imn) + imn;
+						t = PRANDOM32_INCLUSIVE(imn, imx);
 						s = htonl(t);
 					} while (ipv4_is_loopback(s) ||
 						ipv4_is_multicast(s) ||
@@ -2801,7 +2925,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 		if (imn < imx) {
 			__u32 t;
 			if (pkt_dev->flags & F_TUNMETA_RND) {
-				t = prandom_u32() % (imx - imn) + imn;
+				t = PRANDOM32_INCLUSIVE(imn, imx);
 			} else {
 				t = ntohl(pkt_dev->cur_tun_saddr);
 				t++;
@@ -2815,22 +2939,54 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
 	if (pkt_dev->min_pkt_size < pkt_dev->max_pkt_size) {
 		__u32 t;
 		if (pkt_dev->flags & F_TXSIZE_RND) {
-			t = prandom_u32() %
-				(pkt_dev->max_pkt_size - pkt_dev->min_pkt_size)
-				+ pkt_dev->min_pkt_size;
+			t = PRANDOM32_INCLUSIVE(pkt_dev->min_pkt_size, pkt_dev->max_pkt_size);
 		} else {
 			t = pkt_dev->cur_pkt_size + 1;
 			if (t > pkt_dev->max_pkt_size)
 				t = pkt_dev->min_pkt_size;
 		}
 		pkt_dev->cur_pkt_size = t;
-	}
+	} else if (pkt_dev->n_imix_entries > 0) {
+        struct imix_pkt *entry;
+        __u32 t = PRANDOM32_BELOW(IMIX_PRECISION);
+        __u8 entry_index = pkt_dev->imix_distribution[t];
+
+        entry = &pkt_dev->imix_entries[entry_index];
+        entry->count_so_far++;
+        pkt_dev->cur_pkt_size = entry->size;
+    }
 
 	set_cur_queue_map(pkt_dev);
 
 	pkt_dev->flows[flow].count++;
 }
 
+static void fill_imix_distribution(struct pktgen_dev *pkt_dev)
+{
+    int cumulative_probabilites[MAX_IMIX_ENTRIES];
+    int j = 0;
+    __u64 cumulative_prob = 0;
+    __u64 total_weight = 0;
+    int i = 0;
+
+    for (i = 0; i < pkt_dev->n_imix_entries; i++)
+        total_weight += pkt_dev->imix_entries[i].weight;
+
+    /* Fill cumulative_probabilites with sum of normalized probabilities */
+    for (i = 0; i < pkt_dev->n_imix_entries - 1; i++) {
+        cumulative_prob += div64_u64(pkt_dev->imix_entries[i].weight *
+                             IMIX_PRECISION,
+                         total_weight);
+        cumulative_probabilites[i] = cumulative_prob;
+    }
+    cumulative_probabilites[pkt_dev->n_imix_entries - 1] = 100;
+
+    for (i = 0; i < IMIX_PRECISION; i++) {
+        if (i == cumulative_probabilites[j])
+            j++;
+        pkt_dev->imix_distribution[i] = j;
+    }
+}
 
 #ifdef CONFIG_XFRM
 static u32 pktgen_dst_metrics[RTAX_MAX + 1] = {
@@ -3746,7 +3902,19 @@ static void show_results(struct pktgen_dev *pkt_dev, int nr_frags)
 	pps = div64_u64(pkt_dev->sofar * NSEC_PER_SEC,
 			ktime_to_ns(elapsed));
 
-	bps = pps * 8 * pkt_dev->cur_pkt_size;
+    if (pkt_dev->n_imix_entries > 0) {
+        int i;
+        struct imix_pkt *entry;
+
+        bps = 0;
+        for (i = 0; i < pkt_dev->n_imix_entries; i++) {
+            entry = &pkt_dev->imix_entries[i];
+            bps += entry->size * entry->count_so_far;
+        }
+        bps = div64_u64(bps * 8 * NSEC_PER_SEC, ktime_to_ns(elapsed));
+    } else {
+        bps = pps * 8 * pkt_dev->cur_pkt_size;
+    }
 
 	mbps = bps;
 	do_div(mbps, 1000000);
