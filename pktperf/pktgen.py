@@ -72,6 +72,7 @@ class Pktgen:
         self.pkt_size = int(args.size)
         self.dst_mac = args.mac
         self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(args.ipv6, args.dest)
+        self.src_ip_min, self.src_ip_max = self.__init_ip_input(args.ipv6, args.src)
         self.dst_port_min, self.dst_port_max = self.__init_port_range(args.portrange)
         self.frags = None
         self.csum = args.txcsum
@@ -254,6 +255,16 @@ class Pktgen:
             self.pg_set(dev, "dst_min %s" % (self.dst_ip_min))
             self.pg_set(dev, "dst_max %s" % (self.dst_ip_max))
 
+    def __config_ip_src(self, dev) -> None:
+        if self.src_ip_min == "":
+            return None
+        if self.ipv6 is True:
+            self.pg_set(dev, "src_min6 %s" % (self.src_ip_min))
+            self.pg_set(dev, "src_max6 %s" % (self.src_ip_max))
+        else:
+            self.pg_set(dev, "src_min %s" % (self.src_ip_min))
+            self.pg_set(dev, "src_max %s" % (self.src_ip_max))
+
     def __config_tun_meta(self, dev) -> None:
         if self.tun_vni is not None:
             self.pg_set(dev, "tun_meta %06x" % int(self.tun_vni))
@@ -318,6 +329,7 @@ class Pktgen:
             self.__config_tun_meta(dev)
             self.pg_set(dev, "dst_mac %s" % (self.dst_mac))
             self.__config_ip_dst(dev)
+            self.__config_ip_src(dev)
             self.__config_udp_portrange(dev)
             self.__config_vlan(dev)
 

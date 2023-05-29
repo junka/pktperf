@@ -32,6 +32,9 @@ parser.add_argument('-d',
                     help="destination IP address. CIDR is"
                     " also allowed",
                     required=False)
+parser.add_argument('--src',
+                    help="source IP address. CIDR is also allowed",
+                    required=False)
 parser.add_argument('-m',
                     '--mac',
                     help="destination MAC-addr",
