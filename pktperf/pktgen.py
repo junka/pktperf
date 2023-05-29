@@ -277,8 +277,10 @@ class Pktgen:
                 self.pg_set(dev, "tun_dst_min %s" % self.tun_dst_min)
             if self.tun_dst_max != "":
                 self.pg_set(dev, "tun_dst_max %s" % self.tun_dst_max)
-            # self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
-            # self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
+            if self.inner_smac is not None:
+                self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
+            if self.inner_dmac is not None:
+                self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
 
     def config_queue(self) -> None:
         """configure queues for pktgen"""

@@ -2487,28 +2487,7 @@ static void pktgen_setup_inject(struct pktgen_dev *pkt_dev)
 		pkt_dev->saddr_max = 0;
 		pkt_dev->tun_saddr_min = 0;
 		pkt_dev->tun_saddr_max = 0;
-		if (pkt_dev->tun_vni_min == 0 && pkt_dev->tun_udp_dst == 0) {
-			if (strlen(pkt_dev->src_min) == 0) {
-
-				struct in_device *in_dev;
-
-				rcu_read_lock();
-				in_dev = __in_dev_get_rcu(pkt_dev->odev);
-				if (in_dev) {
-					const struct in_ifaddr *ifa;
-
-					ifa = rcu_dereference(in_dev->ifa_list);
-					if (ifa) {
-						pkt_dev->saddr_min = ifa->ifa_address;
-						pkt_dev->saddr_max = pkt_dev->saddr_min;
-					}
-				}
-				rcu_read_unlock();
-			} else {
-				pkt_dev->saddr_min = in_aton(pkt_dev->src_min);
-				pkt_dev->saddr_max = in_aton(pkt_dev->src_max);
-			}
-		} else {
+		if (pkt_dev->tun_vni_min != 0 && pkt_dev->tun_udp_dst != 0) {
 			if (strlen(pkt_dev->tun_src_min) == 0) {
 
 				struct in_device *in_dev;
@@ -2530,6 +2509,27 @@ static void pktgen_setup_inject(struct pktgen_dev *pkt_dev)
 				pkt_dev->tun_saddr_max = in_aton(pkt_dev->tun_src_max);
 			}
 		}
+		if (strlen(pkt_dev->src_min) == 0) {
+
+			struct in_device *in_dev;
+
+			rcu_read_lock();
+			in_dev = __in_dev_get_rcu(pkt_dev->odev);
+			if (in_dev) {
+				const struct in_ifaddr *ifa;
+
+				ifa = rcu_dereference(in_dev->ifa_list);
+				if (ifa) {
+					pkt_dev->saddr_min = ifa->ifa_address;
+					pkt_dev->saddr_max = pkt_dev->saddr_min;
+				}
+			}
+			rcu_read_unlock();
+		} else {
+			pkt_dev->saddr_min = in_aton(pkt_dev->src_min);
+			pkt_dev->saddr_max = in_aton(pkt_dev->src_max);
+		}
+
 		pkt_dev->daddr_min = in_aton(pkt_dev->dst_min);
 		pkt_dev->daddr_max = in_aton(pkt_dev->dst_max);
 	}
