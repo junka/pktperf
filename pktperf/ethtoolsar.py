@@ -21,7 +21,7 @@ stop = False
 def check_output(args, stderr=None):
     '''Run a command and capture its output'''
     p = subprocess.Popen(args, stdout=subprocess.PIPE, shell=False,
-                            stderr=stderr, bufsize=1)
+                            stderr=stderr)
     out, err = p.communicate()
     return p.returncode, out, err
 

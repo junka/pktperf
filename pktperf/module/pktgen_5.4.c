@@ -3276,11 +3276,12 @@ static void fill_ipv4_layer(struct iphdr *iph, struct pktgen_dev *pkt_dev,
 	ip_send_check(iph);
 }
 
-static void fill_udp_layer(struct udphdr *udph, struct pktgen_dev *pkt_dev,
+static void fill_udp_layer(struct net_device *odev, struct sk_buff *skb,
+					struct udphdr *udph, struct pktgen_dev *pkt_dev,
 					int datalen, bool tun)
 {
 	if (tun) {
-		udph->source = 0;
+		udph->source = udp_flow_src_port(dev_net(odev), skb, 0, 65535, true);
 		udph->dest = htons(pkt_dev->tun_udp_dst);
 	} else {
 		udph->source = htons(pkt_dev->cur_udp_src);
@@ -3400,7 +3401,7 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
 	if (datalen < 0 || datalen < sizeof(struct pktgen_hdr))
 		datalen = sizeof(struct pktgen_hdr);
 
-	fill_udp_layer(udph, pkt_dev, datalen, false);
+	fill_udp_layer(odev, skb, udph, pkt_dev, datalen, false);
 	fill_ipv4_layer(iph, pkt_dev, datalen, false);
 
 	skb->protocol = protocol;
@@ -3487,12 +3488,12 @@ static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
 	vxh->vx_flags = VXLAN_FLAGS;
 	vxh->vx_vni = htonl(pkt_dev->cur_tun_vni << 8);
 
-	fill_udp_layer(inner_udph, pkt_dev, inner_datalen, false);
+	fill_udp_layer(odev, skb, inner_udph, pkt_dev, inner_datalen, false);
 	fill_ipv4_layer(inner_iph, pkt_dev, inner_datalen, false);
 
 	fill_ether_layer(inner_eth, pkt_dev, htons(ETH_P_IP), true);
 
-	fill_udp_layer(udph, pkt_dev, datalen, true);
+	fill_udp_layer(odev, skb, udph, pkt_dev, datalen, true);
 	fill_ipv4_layer(iph, pkt_dev, datalen, true);
 
 	skb->protocol = protocol;
@@ -3573,7 +3574,7 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
 		net_info_ratelimited("increased datalen to %d\n", datalen);
 	}
 
-	fill_udp_layer(udph, pkt_dev, datalen, false);
+	fill_udp_layer(odev, skb, udph, pkt_dev, datalen, false);
 	fill_ipv6_layer(iph, pkt_dev, datalen, false);
 
 	skb->protocol = protocol;
@@ -3663,7 +3664,7 @@ static struct sk_buff *fill_tun_packet_ipv6(struct net_device *odev,
 	}
 
 	udplen = datalen + sizeof(struct udphdr);
-	udph->source = 0;
+	udph->source = udp_flow_src_port(dev_net(odev), skb, 0, 65535, true);
 	udph->dest = htons(pkt_dev->tun_udp_dst);
 	udph->len = htons(udplen);
 	udph->check = 0;
