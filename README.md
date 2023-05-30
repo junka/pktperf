@@ -1,12 +1,14 @@
 # pktperf
-pktgen is very useful for network performance test, especially when we don't have 
-multiple nics for dpdk. And for ```vm2vm``` test, it would be easy to use for end-user.
+pktgen is very useful for network performance test, especially when we don't have multiple nics for dpdk in a vm.
+
+And for ```vm2vm``` test, it would be easy to use for any end-user.
 
 Pktperf is scripts repacked for pktgen (the kernel version).
+Also it provides a out of tree pktgen module (tested on kernel 5.4).
 
-It makes use of the sample scripts in linux kernel [https://github.com/torvalds/linux/tree/master/samples/pktgen]
+It makes use of the sample scripts in linux kernel [samples/pktgen](https://github.com/torvalds/linux/tree/master/samples/pktgen)
 
-All ```cmds``` in [https://www.kernel.org/doc/Documentation/networking/pktgen.txt]
+All ```cmds``` in [networking/pktgen.txt](https://www.kernel.org/doc/Documentation/networking/pktgen.txt)
 
 ## install
 ```pip3 install pktperf```
@@ -19,6 +21,33 @@ pktperf -i eth0 -s 64 -m 00:78:0a:fa:34:12 -t 12 -c 1200 -d 192.168.10.100 -n 0
 
 
 It keeps parameters the same with sample scripts.
+Also provide some scenario testcase
+
+Internet mix test case:
+
+```imix_weights size_1:weight_1,size_2:weight_2,...size_n:weight_n```
+
+For example: 
+```
+imix_weights 40:7,576:4,1500:1
+
+The pkt_size "40" will account for 7 / (7 + 4 + 1) = ~58% of the total
+packets sent.
+
+```
+
+
+micro burst test case:
+
+```microburst duration_wait,duration_send```
+
+```
+microbust 200,100
+
+pktgen will be sending 200ms and then keep 100ms idle, loop follow the pattern
+```
+
+Full command arguements are like below:
 ```
 usage: pktperf.py [-h] -i INTERFACE [-s SIZE] [-d DEST] [-m MAC]
                   [-p PORTRANGE] [-k] [-t THREADS] [-f FIRSTTHREAD] [-c CLONE]

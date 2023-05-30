@@ -16,6 +16,7 @@ def open_write_error(filename, flag, mode="r+"):
             fp_dev.write("%s\n" % flag)
     except IOError:
         print("Error: Cannot open %s" % (filename))
+        raise Exception("Error writing flag %s", flag)
         sys.exit(1)
 
 
@@ -71,7 +72,7 @@ class Pktgen:
         self.pgdev = args.interface
         self.pkt_size = int(args.size)
         self.dst_mac = args.mac
-        self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(args.ipv6, args.dest)
+        self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(args.ipv6, args.dst)
         self.src_ip_min, self.src_ip_max = self.__init_ip_input(args.ipv6, args.src)
         self.dst_port_min, self.dst_port_max = self.__init_port_range(args.portrange)
         self.frags = None
@@ -93,8 +94,8 @@ class Pktgen:
             self.tx_delay = int(args.delay)
         if args.flows is not None:
             self.flows = int(args.flows)
-        if args.flowpkt is not None:
-            self.flow_len = int(args.flowpkt)
+        if args.flowpkts is not None:
+            self.flow_len = int(args.flowpkts)
         self.__init_irq(args.queuemap)
         if args.tos is not None:
             self.tos = int(args.tos)
@@ -110,6 +111,8 @@ class Pktgen:
         self.tun_src_min, self.tun_src_max = self.__init_ip_input(args.ipv6, args.tunsrc)
         self.inner_dmac = args.innerdmac
         self.inner_smac = args.innersmac
+        self.microburst = args.microburst
+        self.imixweight = args.imix
 
     def __init_ip_input(self, is_ipv6, ipstr) -> (str, str):
         """ Init pktgen module ip dst """
@@ -265,6 +268,14 @@ class Pktgen:
             self.pg_set(dev, "src_min %s" % (self.src_ip_min))
             self.pg_set(dev, "src_max %s" % (self.src_ip_max))
 
+    def __config_imix(self, dev) -> None:
+        if self.imixweight is not None:
+            self.pg_set(dev, "imix_weights %s" % self.imixweight.replace(",", " ").replace(":", ","))
+
+    def __config_microburst(self, dev) -> None:
+        if self.microburst is not None:
+            self.pg_set(dev, "micro_burst %s" % self.microburst)
+
     def __config_tun_meta(self, dev) -> None:
         if self.tun_vni is not None:
             self.pg_set(dev, "tun_meta %06x" % int(self.tun_vni))
@@ -281,6 +292,13 @@ class Pktgen:
                 self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
             if self.inner_dmac is not None:
                 self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
+
+    def __config_ratelimit(self, dev) -> None:
+        # rate limit
+        if self.bps_rate is not None:
+            self.pg_set(dev, "rate %s" % (self.bps_rate))
+        if self.pps_rate is not None:
+            self.pg_set(dev, "ratep %s" % (self.pps_rate))
 
     def config_queue(self) -> None:
         """configure queues for pktgen"""
@@ -339,11 +357,10 @@ class Pktgen:
             if self.burst is not None and self.burst > 0:
                 self.pg_set(dev, "burst %d" % self.burst)
 
-            # rate limit
-            if self.bps_rate is not None:
-                self.pg_set(dev, "rate %s" % (self.bps_rate))
-            if self.pps_rate is not None:
-                self.pg_set(dev, "ratep %s" % (self.pps_rate))
+            self.__config_ratelimit(dev)
+
+            self.__config_imix(dev)
+            self.__config_microburst(dev)
 
     def reset(self) -> None:
         """ reset pktgen"""

@@ -28,7 +28,7 @@ parser.add_argument('-s',
                     default=60,
                     required=False)
 parser.add_argument('-d',
-                    '--dest',
+                    '--dst',
                     help="destination IP address. CIDR is"
                     " also allowed",
                     required=False)
@@ -77,19 +77,16 @@ parser.add_argument('-b',
                     default=0,
                     required=False)
 parser.add_argument('-v', '--verbose', help="verbose", action="store_true")
-parser.add_argument('-x', '--debug', help="debug", action="store_true")
+parser.add_argument('--debug', help="debug", action="store_true")
 parser.add_argument('--ipv6', help="IPv6", required=False, action="store_true")
-parser.add_argument('-z',
-                    '--flows',
+parser.add_argument('--flows',
                     help="Limit number of flows",
                     default=0,
                     required=False)
-parser.add_argument('-l',
-                    '--flowpkt',
+parser.add_argument('--flowpkts',
                     help="packets number a flow will send",
                     required=False)
-parser.add_argument('-w',
-                    '--delay',
+parser.add_argument('-w', '--delay',
                     help="Tx Delay value (ns)",
                     default=0,
                     required=False)
@@ -98,8 +95,7 @@ parser.add_argument('--append',
                     "state, but will append its config",
                     required=False,
                     action="store_true")
-parser.add_argument('-q',
-                    '--queuemap',
+parser.add_argument('-q', '--queuemap',
                     help="queue mapping with irq affinity",
                     required=False,
                     action="store_true")
@@ -107,12 +103,10 @@ parser.add_argument('--tos',
                     help="tos for IPv4 or traffic class for IPv6 traffic",
                     default=0,
                     required=False)
-parser.add_argument('-r',
-                    '--bps',
+parser.add_argument('-r', '--bps',
                     help="bps rate limit per thread",
                     required=False)
-parser.add_argument('-y',
-                    '--pps',
+parser.add_argument('-y', '--pps',
                     help="pps rate limit per thread",
                     required=False)
 parser.add_argument('--frags',
@@ -126,7 +120,9 @@ parser.add_argument('--tundst', help="tunnel outer ip dst", required=False)
 parser.add_argument('--tunsrc', help="tunnerl outer ip src", required=False)
 parser.add_argument('--innerdmac', help="inner dst mac", required=False)
 parser.add_argument('--innersmac', help="inner src mac", required=False)
-
+parser.add_argument('--microburst', help="enable micro burst model", required=False)
+parser.add_argument('--timeout', help="set timeout for pktgen runs", default=0, type=int)
+parser.add_argument('--imix', help="set imix test weight parameter list", required=False)
 
 def main():
     """ main function entry """
@@ -149,6 +145,10 @@ def main():
         sys.exit(0)
 
     signal.signal(signal.SIGINT, sig_exit)
+    signal.signal(signal.SIGALRM, sig_exit)
+
+    if int(args.timeout) > 0:
+        signal.alarm(int(args.timeout))
     pktgen.config_queue()
     tui.start()
     pktgen.start()
