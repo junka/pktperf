@@ -4711,5 +4711,5 @@ module_param(pg_delay_d, int, 0);
 MODULE_PARM_DESC(pg_delay_d, "Default delay between packets (nanoseconds)");
 module_param(pg_clone_skb_d, int, 0);
 MODULE_PARM_DESC(pg_clone_skb_d, "Default number of copies of the same packet");
-module_param(debug, int, 1);
+module_param(debug, int, 0);
 MODULE_PARM_DESC(debug, "Enable debugging of pktgen module");

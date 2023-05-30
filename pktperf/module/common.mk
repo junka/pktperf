@@ -230,55 +230,6 @@ ifneq (${LINUX_VERSION_CODE},)
   EXTRA_CFLAGS += -DLINUX_VERSION_CODE=${LINUX_VERSION_CODE}
 endif
 
-# Determine SLE_KERNEL_REVISION for SuSE SLE >= 11 (needed by kcompat)
-# This assumes SuSE will continue setting CONFIG_LOCALVERSION to the string
-# appended to the stable kernel version on which their kernel is based with
-# additional versioning information (up to 3 numbers), a possible abbreviated
-# git SHA1 commit id and a kernel type, e.g. CONFIG_LOCALVERSION=-1.2.3-default
-# or CONFIG_LOCALVERSION=-999.gdeadbee-default
-# SLE >= 15SP3 added additional information about version and service pack
-# to their kernel version e.g CONFIG_LOCALVERSION=-150300.59.43.1-default
-#
-# SLE_LOCALVERSION_CODE is also exported to support legacy kcompat.h
-# definitions.
-ifeq (1,$(call get_config_value,CONFIG_SUSE_KERNEL))
-
-ifneq (10,$(call get_config_value,CONFIG_SLE_VERSION))
-
-  CONFIG_LOCALVERSION := $(call get_config_value,CONFIG_LOCALVERSION)
-  LOCALVERSION := $(shell echo ${CONFIG_LOCALVERSION} | \
-                    cut -d'-' -f2 | sed 's/\.g[[:xdigit:]]\{7\}//')
-  LOCALVER_A := $(shell echo ${LOCALVERSION} | cut -d'.' -f1)
-ifeq ($(shell test ${LOCALVER_A} -gt 65535; echo $$?),0)
-  LOCAL_VER_MAJOR := $(shell echo ${LOCALVER_A:0:3})
-  LOCAL_VER_MINOR := $(shell echo ${LOCALVER_A:3:3})
-  LOCALVER_B := $(shell echo ${LOCALVERSION} | cut -s -d'.' -f2)
-  LOCALVER_C := $(shell echo ${LOCALVERSION} | cut -s -d'.' -f3)
-  LOCALVER_D := $(shell echo ${LOCALVERSION} | cut -s -d'.' -f4)
-  SLE_LOCALVERSION_CODE := $(shell expr ${LOCALVER_B} \* 65536 + \
-                                        0${LOCALVER_C} \* 256 + 0${LOCALVER_D})
-  EXTRA_CFLAGS += -DSLE_LOCALVERSION_CODE=${SLE_LOCALVERSION_CODE}
-  EXTRA_CFLAGS += -DSLE_KERNEL_REVISION=${LOCALVER_B}
-else
-  LOCALVER_B := $(shell echo ${LOCALVERSION} | cut -s -d'.' -f2)
-  LOCALVER_C := $(shell echo ${LOCALVERSION} | cut -s -d'.' -f3)
-  SLE_LOCALVERSION_CODE := $(shell expr ${LOCALVER_A} \* 65536 + \
-                                        0${LOCALVER_B} \* 256 + 0${LOCALVER_C})
-  EXTRA_CFLAGS += -DSLE_LOCALVERSION_CODE=${SLE_LOCALVERSION_CODE}
-  EXTRA_CFLAGS += -DSLE_KERNEL_REVISION=${LOCALVER_A}
-endif
-endif
-endif
-
-# Check if it is Oracle Linux UEK kernel and take release patch number from it
-ifneq (,$(findstring uek,${BUILD_KERNEL}))
-  EXTRAVERSION := $(shell echo ${BUILD_KERNEL} | cut -s -d '-' -f2-)
-  UEK_RELEASE_NUMBER := $(shell echo ${EXTRAVERSION} | cut -s -d '.' -f1)
-  UEK_MINOR_RELEASE_NUMBER := $(shell echo ${EXTRAVERSION} | cut -s -d '.' -f2)
-  EXTRA_CFLAGS += -DUEK_RELEASE_NUMBER=${UEK_RELEASE_NUMBER}
-  EXTRA_CFLAGS += -DUEK_MINOR_RELEASE_NUMBER=${UEK_MINOR_RELEASE_NUMBER}
-endif
-
 EXTRA_CFLAGS += ${CFLAGS_EXTRA}
 
 # get the kernel version - we use this to find the correct install path
@@ -415,56 +366,12 @@ endif
 # Module Install Directory #
 ############################
 
-# Default to using updates/drivers/net/ethernet/intel/ path, since depmod since
+# Default to using updates/ path, since depmod since
 # v3.1 defaults to checking updates folder first, and only checking kernels/
 # and extra afterwards. We use updates instead of kernel/* due to desire to
 # prevent over-writing built-in modules files.
-export INSTALL_MOD_DIR ?= updates/drivers/net/ethernet/intel/${DRIVER}
+export INSTALL_MOD_DIR ?= updates
 
-#################
-# Auxiliary Bus #
-#################
-
-# If the check_aux_bus script exists, then this driver depends on the
-# auxiliary module. Run the script to determine if we need to include
-# auxiliary files with this build.
-CHECK_AUX_BUS ?= ../scripts/check_aux_bus
-ifneq ($(call test_file,${CHECK_AUX_BUS}),)
-NEED_AUX_BUS := $(shell ${CHECK_AUX_BUS} --ksrc="${KSRC}" --build-kernel="${BUILD_KERNEL}" >/dev/null 2>&1; echo $$?)
-endif # check_aux_bus exists
-
-# The out-of-tree auxiliary module we ship should be moved into this
-# directory as part of installation.
-export INSTALL_AUX_DIR ?= updates/drivers/net/ethernet/intel/auxiliary
-
-# If we're installing auxiliary bus out-of-tree, the following steps are
-# necessary to ensure the relevant files get put in place.
-AUX_BUS_HEADER ?= linux/auxiliary_bus.h
-ifeq (${NEED_AUX_BUS},2)
-define auxiliary_post_install
-	install -D -m 644 Module.symvers ${INSTALL_MOD_PATH}/lib/modules/${KVER}/extern-symvers/intel_auxiliary.symvers
-	install -d ${INSTALL_MOD_PATH}/lib/modules/${KVER}/${INSTALL_AUX_DIR}
-	mv -f ${INSTALL_MOD_PATH}/lib/modules/${KVER}/${INSTALL_MOD_DIR}/intel_auxiliary.ko* \
-	      ${INSTALL_MOD_PATH}/lib/modules/${KVER}/${INSTALL_AUX_DIR}/
-	install -D -m 644 ${AUX_BUS_HEADER} ${INSTALL_MOD_PATH}/${KSRC}/include/linux/auxiliary_bus.h
-endef
-else
-auxiliary_post_install =
-endif
-
-ifeq (${NEED_AUX_BUS},2)
-define auxiliary_post_uninstall
-	rm -f ${INSTALL_MOD_PATH}/lib/modules/${KVER}/extern-symvers/intel_auxiliary.symvers
-	rm -f ${INSTALL_MOD_PATH}/lib/modules/${KVER}/${INSTALL_AUX_DIR}/intel_auxiliary.ko
-	rm -f ${INSTALL_MOD_PATH}/${KSRC}/include/linux/auxiliary_bus.h
-endef
-else
-auxiliary_post_uninstall =
-endif
-
-ifeq (${NEED_AUX_BUS},2)
-EXTRA_CFLAGS += -DUSE_INTEL_AUX_BUS
-endif
 ######################
 # Kernel Build Macro #
 ######################
@@ -496,5 +403,4 @@ kernelbuild = $(call warn_signed_modules) \
                       M="${CURDIR}" \
                       $(if ${W},W="${W}") \
                       $(if ${C},C="${C}") \
-                      $(if ${NEED_AUX_BUS},NEED_AUX_BUS="${NEED_AUX_BUS}") \
                       ${2} ${1}

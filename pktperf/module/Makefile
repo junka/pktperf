@@ -122,7 +122,7 @@ help:
 	@echo '  W=N                 - Kernel variable for setting warning levels'
 	@echo '  V=N                 - Kernel variable for setting output verbosity'
 	@echo '  INSTALL_MOD_PATH    - Add prefix for the module and manpage installation path'
-	@echo '  INSTALL_MOD_DIR     - Use module directory other than updates/drivers/net/ethernet/intel/${DRIVER}'
+	@echo '  INSTALL_MOD_DIR     - Use module directory other than updates'
 	@echo '  KSRC                - Specifies the full path to the kernel tree to build against'
 	@echo ' Other variables may be available for tuning make process, see'
 	@echo ' Kernel Kbuild documentation for more information'

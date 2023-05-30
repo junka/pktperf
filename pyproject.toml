@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pktperf"
-version = "0.4.1"
+version = "0.5.0"
 authors = [
   { name="junka", email="wan.junjie@foxmail.com" },
 ]
@@ -14,6 +14,7 @@ requires-python = ">=3.5"
 classifiers = [
     "Programming Language :: Python :: 3",
     "License :: OSI Approved :: BSD License",
+    "License :: OSI Approved :: GPL License",
     "Operating System :: POSIX :: Linux",
 ]
 dependencies = [
