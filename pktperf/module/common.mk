@@ -97,16 +97,16 @@ ifeq (,${SCRIPT_PATH})
   info_signed_modules += echo "*** Could not find sign-file script. Cannot sign driver." ;
 else
   SIGN_FILE_EXISTS := $(or $(and $(wildcard $(SCRIPT_PATH)/sign-file),1),)
-  PRIV_KEY_EXISTS := $(or $(and $(wildcard intel-linux-key.key),1),)
-  PUB_KEY_EXISTS := $(or $(and $(wildcard intel-linux-key.crt),1),)
+  PRIV_KEY_EXISTS := $(or $(and $(wildcard linux-key.key),1),)
+  PUB_KEY_EXISTS := $(or $(and $(wildcard linux-key.crt),1),)
 ifneq ($(and $(SIGN_FILE_EXISTS),$(PRIV_KEY_EXISTS),$(PUB_KEY_EXISTS)),)
   info_signed_modules += \
     echo "*** Is sign-file present: ${SIGN_FILE_EXISTS}" ; \
     echo "*** Is private key present: ${PRIV_KEY_EXISTS}" ; \
     echo "*** Is public key present: ${PUB_KEY_EXISTS}" ;
   info_signed_modules += echo "*** All files are present, signing driver." ;
-  sign_driver = $(shell ${SCRIPT_PATH}/sign-file sha256 intel-linux-key.key \
-                        intel-linux-key.crt ${DRIVER}.ko)
+  sign_driver = $(shell ${SCRIPT_PATH}/sign-file sha256 linux-key.key \
+                        linux-key.crt ${DRIVER}.ko)
 else
   info_signed_modules += echo "*** Files are missing, cannot sign driver." ;
   sign_driver =

@@ -68,8 +68,11 @@ sign:
 
 # Install kernel module files. It is not expected to modify files outside of
 # the build root. Thus, it must not update initramfs, or run depmod.
+# overriding config/kernel.release the kver, so the installed package could be
+# installed and depmod in the right place
 modules_install: default
 	@echo "Installing modules..."
+	test -e ${KSRC}/include/config/kernel.release && echo ${KVER} > ${KSRC}/include/config/kernel.release
 	@+$(call kernelbuild,modules_install)
 
 
