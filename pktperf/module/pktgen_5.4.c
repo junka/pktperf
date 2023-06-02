@@ -3379,9 +3379,13 @@ static void fill_ipv6_layer(struct ipv6hdr *iph, struct pktgen_dev *pkt_dev,
 
     iph->payload_len = htons(datalen + 8);
     iph->nexthdr = IPPROTO_UDP;
-
-    iph->daddr = pkt_dev->cur_in6_daddr;
-    iph->saddr = pkt_dev->cur_in6_saddr;
+    if (tun) {
+        iph->daddr = pkt_dev->cur_tun6_daddr;
+        iph->saddr = pkt_dev->cur_tun6_saddr;
+    } else {
+        iph->daddr = pkt_dev->cur_in6_daddr;
+        iph->saddr = pkt_dev->cur_in6_saddr;
+    }
 
 }
 
@@ -3407,6 +3411,31 @@ static void fill_ipv4_csum(struct net_device *odev, struct pktgen_dev *pkt_dev,
             udph->check = CSUM_MANGLED_0;
     }
 }
+
+static void fill_ipv6_csum(struct net_device *odev, struct pktgen_dev *pkt_dev,
+                    struct sk_buff *skb, int datalen,
+                    struct ipv6hdr *iph, struct udphdr *udph)
+{
+    int udplen = datalen + sizeof(struct udphdr);
+    if (!(pkt_dev->flags & F_UDPCSUM)) {
+        skb->ip_summed = CHECKSUM_NONE;
+    } else if (odev->features & (NETIF_F_HW_CSUM | NETIF_F_IPV6_CSUM)) {
+        skb->ip_summed = CHECKSUM_PARTIAL;
+        skb->csum_start = skb_transport_header(skb) - skb->head;
+        skb->csum_offset = offsetof(struct udphdr, check);
+        udph->check = ~csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen, IPPROTO_UDP, 0);
+    } else {
+        __wsum csum = skb_checksum(skb, skb_transport_offset(skb), udplen, 0);
+
+        /* add protocol-dependent pseudo-header */
+        udph->check = csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen,
+                                      IPPROTO_UDP, csum);
+
+        if (udph->check == 0)
+            udph->check = CSUM_MANGLED_0;
+    }
+}
+
 
 static void fill_ether_layer(__u8* eth, struct pktgen_dev *pkt_dev, __u16 protocol, bool tun)
 {
@@ -3493,15 +3522,47 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
     return skb;
 }
 
+static void fill_vxlan_layer(struct vxlanhdr *vxh, struct pktgen_dev *pkt_dev)
+{
+    vxh->vx_flags = VXLAN_FLAGS;
+    vxh->vx_vni = htonl(pkt_dev->cur_tun_vni << 8);
+}
+
+static void fill_inner_packet(struct sk_buff *skb, struct pktgen_dev *pkt_dev,
+                              int data_len)
+{
+    __be16 protocol = htons(ETH_P_IPV6);
+    __u8 *inner_eth;
+    struct udphdr *inner_udph;
+    struct iphdr *inner_iph;
+    struct ipv6hdr *inner_iph6;
+
+    inner_eth = skb_put(skb, 14);
+    if (pkt_dev->flags & F_IPV6) {
+        inner_iph6 = skb_put(skb, sizeof(struct ipv6hdr));
+    } else {
+        protocol = htons(ETH_P_IP);
+        inner_iph = skb_put(skb, sizeof(struct iphdr));
+    }
+    inner_udph = skb_put(skb, sizeof(struct udphdr));
+
+    fill_ether_layer(inner_eth, pkt_dev, protocol, true);
+    if (pkt_dev->flags & F_IPV6) {
+        fill_ipv6_layer(inner_iph6, pkt_dev, data_len, false);
+    } else {
+        fill_ipv4_layer(inner_iph, pkt_dev, data_len, false);
+    }
+    fill_udp_layer(skb, inner_udph, pkt_dev, data_len, false);
+}
 
 static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
                     struct pktgen_dev *pkt_dev)
 {
     struct sk_buff *skb = NULL;
-    __u8 *eth, *inner_eth;
-    struct udphdr *udph, *inner_udph;
+    __u8 *eth;
+    struct udphdr *udph;
     int datalen, inner_datalen;
-    struct iphdr *iph, *inner_iph;
+    struct iphdr *iph;
     struct vxlanhdr *vxh;
     __be16 protocol = htons(ETH_P_IP);
     u16 queue_map;
@@ -3524,6 +3585,9 @@ static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
         return NULL;
     }
 
+    skb_set_queue_mapping(skb, queue_map);
+    skb->priority = pkt_dev->skb_priority;
+
     prefetchw(skb->data);
     skb_reserve(skb, 16);
 
@@ -3542,17 +3606,8 @@ static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
     udph = skb_put(skb, sizeof(struct udphdr));
 
     vxh = skb_put(skb, sizeof(struct vxlanhdr));
-    inner_eth = skb_put(skb, 14);
-    inner_iph = skb_put(skb, sizeof(struct iphdr));
-    inner_udph = skb_put(skb, sizeof(struct udphdr));
-
-    skb_set_queue_mapping(skb, queue_map);
-    skb->priority = pkt_dev->skb_priority;
-
-    fill_ether_layer(eth, pkt_dev, protocol, false);
     /* Eth + IPh + UDPh + mpls */
-    datalen = pkt_dev->cur_pkt_size - 14 - 20 - 8 -
-          pkt_dev->pkt_overhead;
+    datalen = pkt_dev->cur_pkt_size - 14 - 20 - 8 - pkt_dev->pkt_overhead;
     /* vxlan + ether + ip + udp */
     inner_datalen = datalen - 8 - 14 - 20 - 8;
     if (datalen < 0 || datalen < sizeof(struct pktgen_hdr))
@@ -3560,13 +3615,11 @@ static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
     if (inner_datalen < 0 || inner_datalen < sizeof(struct pktgen_hdr))
         inner_datalen = sizeof(struct pktgen_hdr);
 
-    vxh->vx_flags = VXLAN_FLAGS;
-    vxh->vx_vni = htonl(pkt_dev->cur_tun_vni << 8);
+    fill_vxlan_layer(vxh, pkt_dev);
 
-    fill_ether_layer(inner_eth, pkt_dev, htons(ETH_P_IP), true);
-    fill_udp_layer(skb, inner_udph, pkt_dev, inner_datalen, false);
-    fill_ipv4_layer(inner_iph, pkt_dev, inner_datalen, false);
+    fill_inner_packet(skb, pkt_dev, inner_datalen);
 
+    fill_ether_layer(eth, pkt_dev, protocol, false);
     fill_udp_layer(skb, udph, pkt_dev, datalen, true);
     fill_ipv4_layer(iph, pkt_dev, datalen, true);
 
@@ -3592,7 +3645,7 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
     struct sk_buff *skb = NULL;
     __u8 *eth;
     struct udphdr *udph;
-    int datalen, udplen;
+    int datalen;
     struct ipv6hdr *iph;
     __be16 protocol = htons(ETH_P_IPV6);
     u16 queue_map;
@@ -3653,25 +3706,10 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
     skb->dev = odev;
     skb->pkt_type = PACKET_HOST;
 
-    udplen = datalen + sizeof(struct udphdr);
     pktgen_finalize_skb(pkt_dev, skb, datalen);
 
-    if (!(pkt_dev->flags & F_UDPCSUM)) {
-        skb->ip_summed = CHECKSUM_NONE;
-    } else if (odev->features & (NETIF_F_HW_CSUM | NETIF_F_IPV6_CSUM)) {
-        skb->ip_summed = CHECKSUM_PARTIAL;
-        skb->csum_start = skb_transport_header(skb) - skb->head;
-        skb->csum_offset = offsetof(struct udphdr, check);
-        udph->check = ~csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen, IPPROTO_UDP, 0);
-    } else {
-        __wsum csum = skb_checksum(skb, skb_transport_offset(skb), udplen, 0);
+    fill_ipv6_csum(odev, pkt_dev, skb, datalen, iph, udph);
 
-        /* add protocol-dependent pseudo-header */
-        udph->check = csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen, IPPROTO_UDP, csum);
-
-        if (udph->check == 0)
-            udph->check = CSUM_MANGLED_0;
-    }
 
     return skb;
 }
@@ -3682,8 +3720,9 @@ static struct sk_buff *fill_tun_packet_ipv6(struct net_device *odev,
     struct sk_buff *skb = NULL;
     __u8 *eth;
     struct udphdr *udph;
-    int datalen, udplen;
+    int datalen, inner_datalen;
     struct ipv6hdr *iph;
+    struct vxlanhdr *vxh;
     __be16 protocol = htons(ETH_P_IPV6);
     u16 queue_map;
 
@@ -3705,6 +3744,9 @@ static struct sk_buff *fill_tun_packet_ipv6(struct net_device *odev,
         return NULL;
     }
 
+    skb_set_queue_mapping(skb, queue_map);
+    skb->priority = pkt_dev->skb_priority;
+
     prefetchw(skb->data);
     skb_reserve(skb, 16);
 
@@ -3722,63 +3764,35 @@ static struct sk_buff *fill_tun_packet_ipv6(struct net_device *odev,
 
     skb_set_transport_header(skb, skb->len);
     udph = skb_put(skb, sizeof(struct udphdr));
-    skb_set_queue_mapping(skb, queue_map);
-    skb->priority = pkt_dev->skb_priority;
 
-    memcpy(eth, pkt_dev->hh, 12);
-    *(__be16 *) &eth[12] = protocol;
+    vxh = skb_put(skb, sizeof(struct vxlanhdr));
 
     /* Eth + IPh + UDPh + mpls */
     datalen = pkt_dev->cur_pkt_size - 14 -
           sizeof(struct ipv6hdr) - sizeof(struct udphdr) -
           pkt_dev->pkt_overhead;
+    /* vxlan + ether + ip6 + udp */
+    inner_datalen = datalen - 8 - 14 - 40 - 8;
 
     if (datalen < 0 || datalen < sizeof(struct pktgen_hdr)) {
-        datalen = sizeof(struct pktgen_hdr);
+        datalen = sizeof(struct pktgen_hdr) + 70;
         net_info_ratelimited("increased datalen to %d\n", datalen);
     }
+    if (inner_datalen < 0 || inner_datalen < sizeof(struct pktgen_hdr))
+        inner_datalen = sizeof(struct pktgen_hdr);
 
-    udplen = datalen + sizeof(struct udphdr);
-    udph->source = udp_tun_flow_src_port(skb, 1, 65535);
-    udph->dest = htons(pkt_dev->tun_udp_dst);
-    udph->len = htons(udplen);
-    udph->check = 0;
+    fill_vxlan_layer(vxh, pkt_dev);
+    fill_inner_packet(skb, pkt_dev, inner_datalen);
 
-    *(__be32 *) iph = htonl(0x60000000);    /* Version + flow */
-
-    if (pkt_dev->traffic_class) {
-        /* Version + traffic class + flow (0) */
-        *(__be32 *)iph |= htonl(0x60000000 | (pkt_dev->traffic_class << 20));
-    }
-
-    iph->hop_limit = 32;
-
-    iph->payload_len = htons(udplen);
-    iph->nexthdr = IPPROTO_UDP;
-
-    iph->daddr = pkt_dev->cur_tun6_daddr;
-    iph->saddr = pkt_dev->cur_tun6_saddr;
+    fill_ether_layer(eth, pkt_dev, protocol, false);
+    fill_udp_layer(skb, udph, pkt_dev, datalen, false);
+    fill_ipv6_layer(iph, pkt_dev, datalen, true);
 
     skb->pkt_type = PACKET_HOST;
 
     pktgen_finalize_skb(pkt_dev, skb, datalen);
 
-    if (!(pkt_dev->flags & F_UDPCSUM)) {
-        skb->ip_summed = CHECKSUM_NONE;
-    } else if (odev->features & (NETIF_F_HW_CSUM | NETIF_F_IPV6_CSUM)) {
-        skb->ip_summed = CHECKSUM_PARTIAL;
-        skb->csum_start = skb_transport_header(skb) - skb->head;
-        skb->csum_offset = offsetof(struct udphdr, check);
-        udph->check = ~csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen, IPPROTO_UDP, 0);
-    } else {
-        __wsum csum = skb_checksum(skb, skb_transport_offset(skb), udplen, 0);
-
-        /* add protocol-dependent pseudo-header */
-        udph->check = csum_ipv6_magic(&iph->saddr, &iph->daddr, udplen, IPPROTO_UDP, csum);
-
-        if (udph->check == 0)
-            udph->check = CSUM_MANGLED_0;
-    }
+    fill_ipv6_csum(odev, pkt_dev, skb, datalen, iph, udph);
 
     return skb;
 }

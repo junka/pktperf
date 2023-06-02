@@ -1,14 +1,15 @@
 # pktperf
 pktgen is very useful for network performance test, especially when we don't have multiple nics for dpdk in a vm.
 
-And for ```vm2vm``` test, it would be easy to use for any end-user.
-
-Pktperf is scripts repacked for pktgen (the kernel version).
-Also it provides a out of tree pktgen module (tested on kernel 5.4).
-
 It makes use of the sample scripts in linux kernel [samples/pktgen](https://github.com/torvalds/linux/tree/master/samples/pktgen)
 
 All ```cmds``` in [networking/pktgen.txt](https://www.kernel.org/doc/Documentation/networking/pktgen.txt)
+
+---
+
+Pktperf is python scripts for pktgen (the kernel version).
+Also it provides a out of tree pktgen module (tested on kernel 5.4, but supposed to be compatible with 4.15 at mininum). During pip install, it will try builing the module and if not only the original pktgen function can be supported.
+
 
 ## install
 ```pip3 install pktperf```
@@ -46,55 +47,6 @@ microbust 200,100
 
 pktgen will be sending 200ms and then keep 100ms idle, loop follow the pattern
 ```
-
-Full command arguements are like below:
-```
-usage: pktperf.py [-h] -i INTERFACE [-s SIZE] [-d DEST] [-m MAC]
-                  [-p PORTRANGE] [-k] [-t THREADS] [-f FIRSTTHREAD] [-c CLONE]
-                  [-n NUM] [-b BURST] [-v] [-x] [--ipv6] [-z FLOWS]
-                  [-l FLOWPKT] [-w DELAY] [-a] [-q] [-o TOS] [-r BPS] [-y PPS]
-                  [-e FRAGS]
-
-pktgen python scripts
-
-optional arguments:
-  -h, --help            show this help message and exit
-  -i INTERFACE, --interface INTERFACE
-                        output interface/device
-  -s SIZE, --size SIZE  packet size
-  -d DEST, --dest DEST  destination IP. CIDR is also allowed
-  -m MAC, --mac MAC     destination MAC-addr
-  -p PORTRANGE, --portrange PORTRANGE
-                        destination PORT range is also allowed
-  -k, --txcsum          enable UDP tx checksum
-  -t THREADS, --threads THREADS
-                        threads to start
-  -f FIRSTTHREAD, --firstthread FIRSTTHREAD
-                        index of first thread
-  -c CLONE, --clone CLONE
-                        SKB clones send before alloc new SKB
-  -n NUM, --num NUM     num messages to send per thread, 0 means indefinitely
-  -b BURST, --burst BURST
-                        HW level bursting of SKBs
-  -v, --verbose         verbose
-  -x, --debug           debug
-  --ipv6                IPv6
-  -z FLOWS, --flows FLOWS
-                        Limit number of flows
-  -l FLOWPKT, --flowpkt FLOWPKT
-                        packets number a flow will send
-  -w DELAY, --delay DELAY
-                        Tx Delay value (ns)
-  -a, --append          Script will not reset generator's state, but will
-                        append its config
-  -q, --queuemap        queue mapping with irq affinity
-  -o TOS, --tos TOS     tos for IPv4 or traffic class for IPv6 traffic
-  -r BPS, --bps BPS     bps rate limit per thread
-  -y PPS, --pps PPS     pps rate limit per thread
-  -e FRAGS, --frags FRAGS
-                        frags number in skb_shared_info
-```
-
 
 
 During pktgen running, all stats will be display with 1 sec interval

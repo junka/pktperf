@@ -49,7 +49,6 @@ class Pktgen:
             burst: hw level bursting of skbs
             verbose: verbose
             debug: debug
-            ipv6: send IPv6 packets
             flows: limit number of flows
             flow_len: packets number a flow will send
             tx_delay: tx delay value in ns
@@ -72,8 +71,8 @@ class Pktgen:
         self.pgdev = args.interface
         self.pkt_size = int(args.size)
         self.dst_mac = args.mac
-        self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(args.ipv6, args.dst)
-        self.src_ip_min, self.src_ip_max = self.__init_ip_input(args.ipv6, args.src)
+        self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(args.dst)
+        self.src_ip_min, self.src_ip_max = self.__init_ip_input(args.src)
         self.dst_port_min, self.dst_port_max = self.__init_port_range(args.portrange)
         self.frags = None
         self.csum = args.txcsum
@@ -107,16 +106,15 @@ class Pktgen:
         self.svlan = args.svlan
         self.tun_vni = args.vni
         self.tun_udpport = args.tundport
-        self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(args.ipv6, args.tundst)
-        self.tun_src_min, self.tun_src_max = self.__init_ip_input(args.ipv6, args.tunsrc)
+        self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(args.tundst)
+        self.tun_src_min, self.tun_src_max = self.__init_ip_input(args.tunsrc)
         self.inner_dmac = args.innerdmac
         self.inner_smac = args.innersmac
         self.microburst = args.microburst
         self.imixweight = args.imix
 
-    def __init_ip_input(self, is_ipv6, ipstr) -> (str, str):
+    def __init_ip_input(self, ipstr) -> (str, str):
         """ Init pktgen module ip dst """
-        self.ipv6 = is_ipv6
         if ipstr is None:
             return "", ""
         net = None
@@ -139,8 +137,6 @@ class Pktgen:
                 ip_max = ip_min
         if net is not None:
             ip_list = list(net)
-            if ip_list[0].version == 6:
-                self.ipv6 = True
             ip_min = ip_list[0]
             ip_max = ip_list[-1]
         return ip_min, ip_max
@@ -251,7 +247,7 @@ class Pktgen:
 
     def __config_ip_dst(self, dev) -> None:
         # Destination
-        if self.ipv6 is True:
+        if self.dst_ip_min.version == 6:
             self.pg_set(dev, "dst_min6 %s" % (self.dst_ip_min))
             self.pg_set(dev, "dst_max6 %s" % (self.dst_ip_max))
         else:
@@ -261,7 +257,7 @@ class Pktgen:
     def __config_ip_src(self, dev) -> None:
         if self.src_ip_min == "":
             return None
-        if self.ipv6 is True:
+        if self.src_ip_min.version == 6:
             self.pg_set(dev, "src_min6 %s" % (self.src_ip_min))
             self.pg_set(dev, "src_max6 %s" % (self.src_ip_max))
         else:

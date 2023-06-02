@@ -78,7 +78,6 @@ parser.add_argument('-b',
                     required=False)
 parser.add_argument('-v', '--verbose', help="verbose", action="store_true")
 parser.add_argument('--debug', help="debug", action="store_true")
-parser.add_argument('--ipv6', help="IPv6", required=False, action="store_true")
 parser.add_argument('--flows',
                     help="Limit number of flows",
                     default=0,
