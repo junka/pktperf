@@ -3653,6 +3653,7 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
     skb->dev = odev;
     skb->pkt_type = PACKET_HOST;
 
+    udplen = datalen + sizeof(struct udphdr);
     pktgen_finalize_skb(pkt_dev, skb, datalen);
 
     if (!(pkt_dev->flags & F_UDPCSUM)) {
