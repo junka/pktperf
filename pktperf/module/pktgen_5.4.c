@@ -189,6 +189,25 @@ typedef struct file_operations fops_t;
 typedef struct proc_ops fops_t;
 #endif
 
+#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+#define HRTIMER_INIT_ON_STACK(t)                                               \
+  hrtimer_init_on_stack(&t.timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS)
+#define HRTIMER_START_EXPIRE(t)                                                \
+  hrtimer_start_expires(&t.timer, HRTIMER_MODE_ABS)
+#else
+#define HRTIMER_INIT_ON_STACK(t)                                               \
+  hrtimer_init_sleeper_on_stack(&t, CLOCK_MONOTONIC, HRTIMER_MODE_ABS)
+#define HRTIMER_START_EXPIRE(t) hrtimer_sleeper_start_expires(&t, HRTIMER_MODE_ABS)
+#endif
+
+#ifndef skb_frag_off_set
+#define skb_frag_off_set(a, off) (a)->page_offset = off
+#endif
+
+#ifndef array_size
+#define array_size(a, b)  (a *b)
+#endif
+
 #define VERSION    "3.0"
 #define IP_NAME_SZ 32
 #define MAX_MPLS_LABELS 16 /* This is the max label stack depth */
@@ -1470,17 +1489,20 @@ static ssize_t pktgen_if_write(struct file *file,
                 pkt_dev->flags |= flag;
         } else {
             sprintf(pg_result,
-                "Flag -:%s:- unknown\nAvailable flags, (prepend ! to un-set flag):\n%s",
-                f,
-                "IPSRC_RND, IPDST_RND, UDPSRC_RND, UDPDST_RND, "
-                "MACSRC_RND, MACDST_RND, TXSIZE_RND, IPV6, "
-                "MPLS_RND, VID_RND, SVID_RND, FLOW_SEQ, "
-                "QUEUE_MAP_RND, QUEUE_MAP_CPU, UDPCSUM, "
-                "NO_TIMESTAMP, "
+                    "Flag -:%s:- unknown\nAvailable flags, (prepend ! to "
+                    "un-set flag):\n%s",
+                    f,
+                    "IPSRC_RND, IPDST_RND, UDPSRC_RND, UDPDST_RND, "
+                    "MACSRC_RND, MACDST_RND, TXSIZE_RND, IPV6, "
+                    "MPLS_RND, VID_RND, SVID_RND, FLOW_SEQ, "
+                    "QUEUE_MAP_RND, QUEUE_MAP_CPU, UDPCSUM, "
+                    "NO_TIMESTAMP, "
 #ifdef CONFIG_XFRM
-                "IPSEC, "
+                    "IPSEC, "
 #endif
-                "NODE_ALLOC, TUNSRC_RND, TUNDST_RND\n");
+                    "NODE_ALLOC, TUNSRC_RND, TUNDST_RND, "
+                    "INNER_MACSRC_RND, INNER_MACDST_RND, "
+                    "TUNMETA_RND, TUN_IPV6\n");
             return count;
         }
         sprintf(pg_result, "OK: flags=0x%x", pkt_dev->flags);
@@ -2592,7 +2614,7 @@ static void spin(struct pktgen_dev *pkt_dev, ktime_t spin_until)
     s64 remaining;
     struct hrtimer_sleeper t;
 
-    hrtimer_init_sleeper_on_stack(&t, CLOCK_MONOTONIC, HRTIMER_MODE_ABS);
+    HRTIMER_INIT_ON_STACK(t);
     hrtimer_set_expires(&t.timer, spin_until);
 
     remaining = ktime_to_ns(hrtimer_expires_remaining(&t.timer));
@@ -2608,7 +2630,7 @@ static void spin(struct pktgen_dev *pkt_dev, ktime_t spin_until)
     } else {
         do {
             set_current_state(TASK_INTERRUPTIBLE);
-            hrtimer_sleeper_start_expires(&t, HRTIMER_MODE_ABS);
+            HRTIMER_START_EXPIRE(t);
 
             if (likely(t.task))
                 schedule();
@@ -2683,7 +2705,11 @@ static void get_ipsec_sa(struct pktgen_dev *pkt_dev, int flow)
             x = xfrm_state_lookup_byspi(pn->net, htonl(pkt_dev->spi), AF_INET);
         } else {
             /* slow path: we dont already have xfrm_state */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 19, 0)
             x = xfrm_stateonly_find(pn->net, DUMMY_MARK, 0,
+#else
+            x = xfrm_stateonly_find(pn->net, DUMMY_MARK,
+#endif
                         (xfrm_address_t *)&pkt_dev->cur_daddr,
                         (xfrm_address_t *)&pkt_dev->cur_saddr,
                         AF_INET,
@@ -3050,7 +3076,11 @@ static int pktgen_output_ipsec(struct sk_buff *skb, struct pktgen_dev *pkt_dev)
         skb->_skb_refdst = (unsigned long)&pkt_dev->xdst.u.dst | SKB_DST_NOREF;
 
     rcu_read_lock_bh();
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 2, 0)
     err = pktgen_xfrm_outer_mode_output(x, skb);
+#else
+    err = x->outer_mode->output(x, skb);
+#endif
     rcu_read_unlock_bh();
     if (err) {
         XFRM_INC_STATS(net, LINUX_MIB_XFRMOUTSTATEMODEERROR);

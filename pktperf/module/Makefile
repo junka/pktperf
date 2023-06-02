@@ -23,7 +23,7 @@ DRIVER := pktgen
 ifneq ($(MAKECMDGOALS),help)
 include common.mk
 # tested over this kernel version, should work for lower version
-$(call minimum_kver_check,4,19,0)
+$(call minimum_kver_check,4,15,0)
 endif
 
 
