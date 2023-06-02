@@ -190,6 +190,9 @@ typedef struct proc_ops fops_t;
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 4, 0)
+#ifndef skb_frag_off_set
+#define skb_frag_off_set(a, off) (a)->page_offset = off
+#endif
 #define HRTIMER_INIT_ON_STACK(t)                                               \
   hrtimer_init_on_stack(&t.timer, CLOCK_MONOTONIC, HRTIMER_MODE_ABS)
 #define HRTIMER_START_EXPIRE(t)                                                \
@@ -200,9 +203,6 @@ typedef struct proc_ops fops_t;
 #define HRTIMER_START_EXPIRE(t) hrtimer_sleeper_start_expires(&t, HRTIMER_MODE_ABS)
 #endif
 
-#ifndef skb_frag_off_set
-#define skb_frag_off_set(a, off) (a)->page_offset = off
-#endif
 
 #ifndef array_size
 #define array_size(a, b)  (a *b)
