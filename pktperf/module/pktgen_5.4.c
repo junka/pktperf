@@ -276,12 +276,12 @@ static char *pkt_flag_names[] = {
 #define M_QUEUE_XMIT        2    /* Inject packet into qdisc */
 
 /* If lock -- protects updating of if_list */
-#define   if_lock(t)           mutex_lock(&(t->if_lock));
-#define   if_unlock(t)           mutex_unlock(&(t->if_lock));
+#define if_lock(t)    mutex_lock(&(t->if_lock));
+#define if_unlock(t)  mutex_unlock(&(t->if_lock));
 
 /* Used to help with determining the pkts on receive */
-#define PKTGEN_MAGIC 0xbe9be955
-#define PG_PROC_DIR "pktgen"
+#define PKTGEN_MAGIC  0xbe9be955
+#define PG_PROC_DIR   "pktgen"
 #define PGCTRL        "pgctrl"
 
 #define MAX_CFLOWS  65536

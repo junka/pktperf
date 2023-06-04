@@ -6,6 +6,7 @@ import sys
 import re
 import os
 import ipaddress
+import subprocess
 from .pktsar import PktSar
 
 
@@ -18,6 +19,18 @@ def open_write_error(filename, flag, mode="r+"):
         print("Error: Cannot open %s" % (filename))
         raise Exception("Error writing flag %s", flag)
         sys.exit(1)
+
+
+def modinfo_check() -> str:
+    """ check module version """
+    p = subprocess.run(['modinfo', 'pktgen'], stdout=subprocess.PIPE, check=True)
+    if p.returncode != 0:
+        return ""
+    ret = p.stdout.decode('utf-8')
+    ver = re.search(r'version:[\t\ ]+([\d\.]+)', ret)
+    if ver is not None:
+        return ver.group(1)
+    return ""
 
 
 class Pktgen:
@@ -62,6 +75,10 @@ class Pktgen:
             sys.exit()
         if os.getuid() != 0:
             print("pktperf should be run as root!")
+            sys.exit()
+        ver = modinfo_check()
+        if ver == "":
+            print("pktgen is not enabled in kernel")
             sys.exit()
         mod = "/proc/net/pktgen"
         is_exists = os.path.exists(mod)
@@ -113,7 +130,7 @@ class Pktgen:
         self.microburst = args.microburst
         self.imixweight = args.imix
 
-    def __init_ip_input(self, ipstr) -> (str, str):
+    def __init_ip_input(self, ipstr):
         """ Init pktgen module ip dst """
         if ipstr is None:
             return "", ""
@@ -141,7 +158,7 @@ class Pktgen:
             ip_max = ip_list[-1]
         return ip_min, ip_max
 
-    def __init_port_range(self, portrange) -> (int, int):
+    def __init_port_range(self, portrange):
         """init port range for pktgen"""
         port_max = 65535
         port_min = 65535
