@@ -9,42 +9,27 @@ import argparse
 from .pktgen import Pktgen, modinfo_check
 
 
-def ui_func(pktgen, event):
-    """ ui_func prints out statistics """
-    while not event.is_set():
-        print("")
-        pktgen.result(False, print)
-        time.sleep(1)
-
-
-parser = argparse.ArgumentParser(description="pktgen python scripts %s" %  modinfo_check())
+parser = argparse.ArgumentParser(description="pktgen python scripts %s" %  modinfo_check(),
+                                epilog='\n')
 parser.add_argument('-i', '--interface', help="output interface/device",
                     required=True)
 parser.add_argument('-s', '--size', help="packet size",
                     default=60, required=False)
 parser.add_argument('-d', '--dst',
                     help="destination IP address. CIDR is"
-                    " also allowed",
-                    required=False)
+                    " also allowed", required=False)
 parser.add_argument('--src',
                     help="source IP address. CIDR is also allowed",
                     required=False)
-parser.add_argument('-m', '--mac',
-                    help="destination MAC-addr",
-                    default="90:e2:ba:ff:ff:ff",
-                    required=False)
-parser.add_argument('-p', '--portrange',
-                    help="destination PORT range is"
-                    " also allowed",
-                    required=False)
-parser.add_argument('-k', '--txcsum',
-                    help="enable UDP tx checksum",
+parser.add_argument('-m', '--mac', help="destination MAC-addr",
+                    default="90:e2:ba:ff:ff:ff", required=False)
+parser.add_argument('-p', '--portrange', help="destination PORT range is"
+                    " also allowed", required=False)
+parser.add_argument('-k', '--txcsum', help="enable UDP tx checksum",
                     required=False, action="store_true")
-parser.add_argument('-t', '--threads',
-                    help="threads to start",
+parser.add_argument('-t', '--threads', help="threads to start",
                     default=1, required=False)
-parser.add_argument('-f', '--firstthread',
-                    help="index of first thread",
+parser.add_argument('-f', '--firstthread', help="index of first thread",
                     default=0, required=False)
 parser.add_argument('-c', '--clone', help="SKB clones before alloc new SKB",
                     default=0, required=False)
@@ -74,7 +59,8 @@ parser.add_argument('--frags', help="frags number in skb_shared_info",
                     required=False)
 parser.add_argument('--vlan', help="vlan id 0-4095", required=False)
 parser.add_argument('--svlan', help="svlan id 0-4095", required=False)
-parser.add_argument('--file', help="config file for all pktgen parameters", required=False)
+parser.add_argument('--file', help="config file for all pktgen parameters, will"
+                    " override all parameters specified from cmdline", required=False)
 
 if modinfo_check() == '3.0':
     parser.add_argument('--vni', help="vxlan vni", required=False)
@@ -86,6 +72,14 @@ if modinfo_check() == '3.0':
     parser.add_argument('--microburst', help="enable micro burst model", required=False)
     parser.add_argument('--timeout', help="set timeout for pktgen runs", default=0, type=int)
     parser.add_argument('--imix', help="set imix test weight parameter list", required=False)
+
+
+def ui_func(pktgen, event):
+    """ ui_func prints out statistics """
+    while not event.is_set():
+        print("")
+        pktgen.result(False, print)
+        time.sleep(1)
 
 
 def main():
@@ -105,6 +99,7 @@ def main():
     def sig_exit(_sig, _frame):
         event.set()
         tui.join()
+        pktgen.stop()
         pktgen.result(True, print)
         sys.exit(0)
 

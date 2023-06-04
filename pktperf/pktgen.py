@@ -7,6 +7,7 @@ import re
 import os
 import ipaddress
 import subprocess
+import configparser
 from .pktsar import PktSar
 
 
@@ -91,6 +92,7 @@ class Pktgen:
         self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(args.dst)
         self.src_ip_min, self.src_ip_max = self.__init_ip_input(args.src)
         self.dst_port_min, self.dst_port_max = self.__init_port_range(args.portrange)
+        self.src_port_min, self.src_port_max = 9, 1009
         self.frags = None
         self.csum = args.txcsum
         self.debug = args.debug
@@ -129,6 +131,53 @@ class Pktgen:
         self.inner_smac = args.innersmac
         self.microburst = args.microburst
         self.imixweight = args.imix
+        self.__read_config_file(args.file)
+
+    def __read_config_file(self, file):
+        cfg = configparser.ConfigParser()
+        if file is not None:
+            # cfg.read(file)
+            with open(file, 'r') as f:
+                config_string = '[dummy]\n' + f.read()
+                cfg.read_string(config_string)
+        else:
+            return
+        if cfg.has_option('dummy', 'pkt_size'):
+            self.pkt_size = cfg.getint('dummy', 'pkt_size')
+        if cfg.has_option('dummy', 'pkt_num'):
+            self.num = cfg.get_int('dummy', 'pkt_num')
+        if cfg.has_option('dummy', 'dst_ip'):
+            self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(cfg.get('dummy', 'dst_ip'))
+        if cfg.has_option('dummy', 'src_ip'):
+            self.src_ip_min, self.src_ip_max = self.__init_ip_input(cfg.get('dummy', 'src_ip'))
+        if cfg.has_option('dummy', 'dstmac'):
+            self.dst_mac = cfg.get('dummy', 'dstmac')
+        if cfg.has_option('dummy', 'vlan'):
+            self.vlan = cfg.get('dummy', 'vlan')
+        if cfg.has_option('dummy', 'svlan'):
+            self.svlan = cfg.get('dummy', 'svlan')
+        if cfg.has_option('dummy', 'udp_src_port'):
+            self.src_port_min, self.src_port_max = self.__init_port_range(cfg.get('dummy', 'udp_src_port'))
+        if cfg.has_option('dummy', 'udp_dst_port'):
+            self.dst_port_min, self.dst_port_max = self.__init_port_range(cfg.get('dummy', 'udp_dst_port'))
+        if cfg.has_option('dummy', 'tos'):
+            self.tos = cfg['tos']
+        if cfg.has_option('dummy', 'tun_vni'):
+            self.tun_vni = cfg.get('dummy', 'tun_vni')
+        if cfg.has_option('dummy', 'tun_udp_port'):
+            self.tun_udpport = cfg.get('dummy', 'tun_udp_port')
+        if cfg.has_option('dummy', 'tun_src_ip'):
+            self.tun_src_min, self.tun_src_max = self.__init_ip_input(cfg.get('dummy', 'tun_src_ip'))
+        if cfg.has_option('dummy', 'tun_dst_ip'):
+            self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(cfg.get('dummy', 'tun_dst_ip'))
+        if cfg.has_option('dummy', 'inner_dstmac'):
+            self.inner_dmac = cfg.get('dummy', 'inner_dstmac')
+        if cfg.has_option('dummy', 'inner_srcmac'):
+            self.inner_smac = cfg.get('dummy', 'inner_srcmac')
+        if cfg.has_option('dummy', 'micro_burst'):
+            self.microburst = cfg.get('dummy', 'micro_burst')
+        if cfg.has_option('dummy', 'imix_weight'):
+            self.imixweight = cfg.get('dummy', 'imix_weight')
 
     def __init_ip_input(self, ipstr):
         """ Init pktgen module ip dst """
@@ -256,11 +305,9 @@ class Pktgen:
             self.pg_set(dev, "flag UDPCSUM")
 
         # Setup random UDP port src range
-        udp_src_min = 9
-        udp_src_max = 1009
         self.pg_set(dev, "flag UDPSRC_RND")
-        self.pg_set(dev, "udp_src_min %d" % (udp_src_min))
-        self.pg_set(dev, "udp_src_max %d" % (udp_src_max))
+        self.pg_set(dev, "udp_src_min %d" % (self.src_port_min))
+        self.pg_set(dev, "udp_src_max %d" % (self.src_port_max))
 
     def __config_ip_dst(self, dev) -> None:
         # Destination
