@@ -2,6 +2,7 @@
 # -*- coding: UTF-8 -*-
 """ pktperf with cli options"""
 import sys
+import os
 import signal
 from threading import Thread, Event
 import time
@@ -78,8 +79,11 @@ def ui_func(pktgen, event):
     """ ui_func prints out statistics """
     while not event.is_set():
         print("")
-        pktgen.result(False, print)
+        ret = pktgen.result(False, print)
+        if ret == 1:
+            os.kill(os.getpid(), signal.SIGINT)
         time.sleep(1)
+    return 0
 
 
 def main():
@@ -101,7 +105,6 @@ def main():
         tui.join()
         pktgen.stop()
         pktgen.result(True, print)
-        sys.exit(0)
 
     signal.signal(signal.SIGINT, sig_exit)
     signal.signal(signal.SIGALRM, sig_exit)

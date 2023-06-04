@@ -5,6 +5,7 @@ classes provide functions for pktgen operation
 import sys
 import re
 import os
+import math
 import ipaddress
 import subprocess
 import configparser
@@ -394,7 +395,7 @@ class Pktgen:
             self.pg_set(dev, "flag QUEUE_MAP_CPU")
 
             # Base config of dev
-            self.pg_set(dev, "count %d" % self.num)
+            self.pg_set(dev, "count %d" % math.ceil(self.num / self.threads))
             self.pg_set(dev, "clone_skb %d" % self.clone)
             self.pg_set(dev, "pkt_size %d" % self.pkt_size)
             if self.frags is not None and self.frags != 1:
@@ -486,7 +487,7 @@ class Pktgen:
             return int(sofar.group(1)), pps, bps, int(sofar.group(2))
         return 0, 0, 0, 0
 
-    def result(self, last, print_cb) -> None:
+    def result(self, last, print_cb) -> int:
         """ Print results """
         if last is True:
             print("%d cores enabled" % self.threads)
@@ -511,6 +512,9 @@ class Pktgen:
                 total_err += sg_err
         print_cb("Total   send %18d pkts: %18d pps %18d bps %6d errors" %
                  (total_pkts, total_pps, total_bps, total_err))
+        if last is False and self.num > 0 and total_pkts >= self.num:
+            return 1
+        return 0
 
     def __get_dev_numa(self) -> int:
         """ __get_dev_numa returns the numa node of the device"""
