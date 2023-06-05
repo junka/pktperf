@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=60.0"]
+requires = ["setuptools", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "pktperf"
-version = "0.5.2"
+version = "0.5.3"
 authors = [
   { name="junka", email="wan.junjie@foxmail.com" },
 ]
