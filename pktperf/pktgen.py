@@ -160,6 +160,10 @@ class Pktgen:
             self.bps_rate = cfg.get('dummy', 'bps_limit')
         if cfg.has_option('dummy', 'pps_limit'):
             self.pps_rate = cfg.get('dummy', 'pps_limit')
+        if cfg.has_option('dummy', 'burst'):
+            self.burst = cfg.getint('dummy', 'burst')
+        if cfg.has_option('dummy', 'imix_weight'):
+            self.clone = cfg.getint('dummy', 'clone')
         if cfg.has_option('dummy', 'dst_ip'):
             self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(cfg.get('dummy', 'dst_ip'))
         if cfg.has_option('dummy', 'src_ip'):
