@@ -485,6 +485,9 @@ struct pktgen_dev {
      */
     __u16 pad;        /* pad out the hh struct to an even 16 bytes */
 
+    __u8 inner_hh[14];
+    __u16 pad1; /* pad out the hh struct to an even 16 bytes */
+
     struct sk_buff *skb;    /* skb we are to transmit next, used for when we
                  * are transmitting the same one multiple times
                  */
@@ -2082,7 +2085,7 @@ static ssize_t pktgen_if_write(struct file *file,
         if (!mac_pton(valstr, pkt_dev->inner_dst_mac))
             return -EINVAL;
         /* Set up Dest MAC */
-        // ether_addr_copy(&pkt_dev->hh[0], pkt_dev->inner_dst_mac);
+        ether_addr_copy(&pkt_dev->inner_hh[0], pkt_dev->inner_dst_mac);
 
         sprintf(pg_result, "OK: inner_dstmac %pM", pkt_dev->inner_dst_mac);
         return count;
@@ -2099,12 +2102,12 @@ static ssize_t pktgen_if_write(struct file *file,
         if (!mac_pton(valstr, pkt_dev->inner_src_mac))
             return -EINVAL;
         /* Set up Src MAC */
-        // ether_addr_copy(&pkt_dev->hh[6], pkt_dev->inner_src_mac);
+        ether_addr_copy(&pkt_dev->inner_hh[6], pkt_dev->inner_src_mac);
 
         sprintf(pg_result, "OK: inner_srcmac %pM", pkt_dev->inner_src_mac);
         return count;
     }
-    if (!strcmp(name, "inner_src_mac_count")) {
+    if (!strcmp(name, "inner_smac_num")) {
         len = num_arg(&user_buffer[i], 10, &value);
         if (len < 0)
             return len;
@@ -2114,11 +2117,11 @@ static ssize_t pktgen_if_write(struct file *file,
             pkt_dev->inner_src_mac_count = value;
             pkt_dev->cur_inner_src_mac_offset = 0;
         }
-        sprintf(pg_result, "OK: inner_src_mac_count=%d",
+        sprintf(pg_result, "OK: inner_smac_num=%d",
             pkt_dev->inner_src_mac_count);
         return count;
     }
-    if (!strcmp(name, "inner_dst_mac_count")) {
+    if (!strcmp(name, "inner_dmac_num")) {
         len = num_arg(&user_buffer[i], 10, &value);
         if (len < 0)
             return len;
@@ -2128,7 +2131,7 @@ static ssize_t pktgen_if_write(struct file *file,
             pkt_dev->inner_dst_mac_count = value;
             pkt_dev->cur_inner_dst_mac_offset = 0;
         }
-        sprintf(pg_result, "OK: inner_dst_mac_count=%d",
+        sprintf(pg_result, "OK: inner_dmac_num=%d",
             pkt_dev->inner_dst_mac_count);
         return count;
     }
@@ -2825,7 +2828,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
         pkt_dev->hh[2] = tmp;
         tmp = (pkt_dev->dst_mac[1] + (tmp >> 8));
         pkt_dev->hh[1] = tmp;
-        }
+    }
 
     if (pkt_dev->flags & F_MPLS_RND) {
         unsigned int i;
@@ -3011,6 +3014,58 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
             }
             pkt_dev->cur_tun_vni = t;
         }
+    }
+
+    /*  Deal with source MAC */
+    if (pkt_dev->inner_src_mac_count > 1 && pkt_dev->tun_vni_min) {
+        __u32 mc;
+        __u32 tmp;
+
+        if (pkt_dev->flags & F_INNER_MACSRC_RND)
+            mc = PRANDOM32_BELOW(pkt_dev->inner_src_mac_count);
+        else {
+            mc = pkt_dev->cur_inner_src_mac_offset++;
+            if (pkt_dev->cur_inner_src_mac_offset >= pkt_dev->inner_src_mac_count)
+                pkt_dev->cur_inner_src_mac_offset = 0;
+        }
+
+        tmp = pkt_dev->inner_src_mac[5] + (mc & 0xFF);
+        pkt_dev->inner_hh[11] = tmp;
+        tmp = (pkt_dev->inner_src_mac[4] + ((mc >> 8) & 0xFF) + (tmp >> 8));
+        pkt_dev->inner_hh[10] = tmp;
+        tmp = (pkt_dev->inner_src_mac[3] + ((mc >> 16) & 0xFF) + (tmp >> 8));
+        pkt_dev->inner_hh[9] = tmp;
+        tmp = (pkt_dev->inner_src_mac[2] + ((mc >> 24) & 0xFF) + (tmp >> 8));
+        pkt_dev->inner_hh[8] = tmp;
+        tmp = (pkt_dev->inner_src_mac[1] + (tmp >> 8));
+        pkt_dev->inner_hh[7] = tmp;
+    }
+
+    /*  Deal with Destination MAC */
+    if (pkt_dev->inner_dst_mac_count > 1 && pkt_dev->tun_vni_min) {
+        __u32 mc;
+        __u32 tmp;
+
+        if (pkt_dev->flags & F_INNER_MACDST_RND)
+            mc = PRANDOM32_BELOW(pkt_dev->inner_dst_mac_count);
+
+        else {
+            mc = pkt_dev->cur_inner_dst_mac_offset++;
+            if (pkt_dev->cur_inner_dst_mac_offset >= pkt_dev->inner_dst_mac_count) {
+                pkt_dev->cur_inner_dst_mac_offset = 0;
+            }
+        }
+
+        tmp = pkt_dev->inner_dst_mac[5] + (mc & 0xFF);
+        pkt_dev->inner_hh[5] = tmp;
+        tmp = (pkt_dev->inner_dst_mac[4] + ((mc >> 8) & 0xFF) + (tmp >> 8));
+        pkt_dev->inner_hh[4] = tmp;
+        tmp = (pkt_dev->inner_dst_mac[3] + ((mc >> 16) & 0xFF) + (tmp >> 8));
+        pkt_dev->inner_hh[3] = tmp;
+        tmp = (pkt_dev->inner_dst_mac[2] + ((mc >> 24) & 0xFF) + (tmp >> 8));
+        pkt_dev->inner_hh[2] = tmp;
+        tmp = (pkt_dev->inner_dst_mac[1] + (tmp >> 8));
+        pkt_dev->inner_hh[1] = tmp;
     }
 
     if (pkt_dev->min_pkt_size < pkt_dev->max_pkt_size) {
@@ -3455,8 +3510,7 @@ static void fill_ipv6_csum(struct net_device *odev, struct pktgen_dev *pkt_dev,
 static void fill_ether_layer(__u8* eth, struct pktgen_dev *pkt_dev, __u16 protocol, bool tun)
 {
     if (tun) {
-        ether_addr_copy(eth, pkt_dev->inner_dst_mac);
-        ether_addr_copy(eth+6, pkt_dev->inner_src_mac);
+        memcpy(eth, pkt_dev->inner_hh, 12);
     } else {
         memcpy(eth, pkt_dev->hh, 12);
     }
@@ -3701,8 +3755,7 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
     skb_set_queue_mapping(skb, queue_map);
     skb->priority = pkt_dev->skb_priority;
 
-    memcpy(eth, pkt_dev->hh, 12);
-    *(__be16 *) &eth[12] = protocol;
+    fill_ether_layer(eth, pkt_dev, protocol, false);
 
     /* Eth + IPh + UDPh + mpls */
     datalen = pkt_dev->cur_pkt_size - 14 -

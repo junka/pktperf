@@ -131,6 +131,8 @@ class Pktgen:
         self.tun_src_min, self.tun_src_max = self.__init_ip_input(args.tunsrc)
         self.inner_dmac = args.innerdmac
         self.inner_smac = args.innersmac
+        self.inner_dmac_count = 0
+        self.inner_smac_count = 0
         self.microburst = args.microburst
         self.imixweight = args.imix
         self.__read_config_file(args.file)
@@ -138,7 +140,6 @@ class Pktgen:
     def __read_config_file(self, file):
         cfg = configparser.ConfigParser()
         if file is not None:
-            # cfg.read(file)
             with open(file, 'r') as f:
                 config_string = '[dummy]\n' + f.read()
                 cfg.read_string(config_string)
@@ -187,6 +188,10 @@ class Pktgen:
             self.inner_dmac = cfg.get('dummy', 'inner_dstmac')
         if cfg.has_option('dummy', 'inner_srcmac'):
             self.inner_smac = cfg.get('dummy', 'inner_srcmac')
+        if cfg.has_option('dummy', 'inner_dmac_num'):
+            self.inner_dmac_count = cfg.getint('dummy', 'inner_dmac_num')
+        if cfg.has_option('dummy', 'inner_smac_num'):
+            self.inner_smac_count = cfg.getint('dummy', 'inner_smac_num')
         if cfg.has_option('dummy', 'micro_burst'):
             self.microburst = cfg.get('dummy', 'micro_burst')
         if cfg.has_option('dummy', 'imix_weight'):
@@ -372,6 +377,10 @@ class Pktgen:
                 self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
             if self.inner_dmac is not None:
                 self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
+            if self.inner_dmac_count > 0:
+                self.pg_set(dev, "inner_dmac_num %d" % self.inner_dmac_count)
+            if self.inner_smac_count > 0:
+                self.pg_set(dev, "inner_smac_num %d" % self.inner_smac_count)
 
     def __config_ratelimit(self, dev) -> None:
         # rate limit
