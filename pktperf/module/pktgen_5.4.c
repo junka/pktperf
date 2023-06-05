@@ -2037,7 +2037,8 @@ static ssize_t pktgen_if_write(struct file *file,
         sprintf(pg_result, "OK: tun_src_max=%s", pkt_dev->tun_src_max);
         return count;
     }
-    if (!strcmp(name, "tun_meta") || !strcmp(name, "vxlan_vni")) {
+    if (!strcmp(name, "tun_meta") || !strcmp(name, "vxlan_vni") ||
+        !strcmp(name, "tun_meta_min") || !strcmp(name, "vxlan_vni_min")) {
         __u32 tmp_value = 0;
         len = hex32_arg(&user_buffer[i], 6, &tmp_value);
         if (len < 0)
@@ -2046,11 +2047,26 @@ static ssize_t pktgen_if_write(struct file *file,
         i += len;
         if (len == 6) {
             pkt_dev->tun_vni_min = tmp_value;
+            pkt_dev->cur_tun_vni = tmp_value;
+            sprintf(pg_result, "OK: tun_meta_min=0x%06x", pkt_dev->cur_tun_vni);
+        } else {
+            sprintf(pg_result, "ERROR: tun_meta_min must be 000000-ffffff");
+        }
+        return count;
+    }
+    if (!strcmp(name, "tun_meta_max") || !strcmp(name, "vxlan_vni_max")) {
+        __u32 tmp_value = 0;
+        len = hex32_arg(&user_buffer[i], 6, &tmp_value);
+        if (len < 0)
+            return len;
+
+        i += len;
+        if (len == 6) {
             pkt_dev->tun_vni_max = tmp_value;
             pkt_dev->cur_tun_vni = tmp_value;
-            sprintf(pg_result, "OK: tun_meta=0x%06x", pkt_dev->cur_tun_vni);
+            sprintf(pg_result, "OK: tun_meta_max=0x%06x", pkt_dev->cur_tun_vni);
         } else {
-            sprintf(pg_result, "ERROR: tun_meta must be 000000-ffffff");
+            sprintf(pg_result, "ERROR: tun_meta_max must be 000000-ffffff");
         }
         return count;
     }
@@ -2921,7 +2937,7 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
             }
         }
     }
-    if (!(pkt_dev->flags & F_TUN_IPV6)) {
+    if ((!(pkt_dev->flags & F_TUN_IPV6)) && pkt_dev->tun_vni_min) {
 
         imn = ntohl(pkt_dev->tun_saddr_min);
         imx = ntohl(pkt_dev->tun_saddr_max);
@@ -2978,23 +2994,22 @@ static void mod_cur_headers(struct pktgen_dev *pkt_dev)
             }
         }
     } else {
-
     }
 
     if (pkt_dev->tun_vni_min) {
-        imn = ntohl(pkt_dev->tun_vni_min);
-        imx = ntohl(pkt_dev->tun_vni_max);
+        imn = pkt_dev->tun_vni_min;
+        imx = pkt_dev->tun_vni_max;
         if (imn < imx) {
             __u32 t;
             if (pkt_dev->flags & F_TUNMETA_RND) {
                 t = PRANDOM32_INCLUSIVE(imn, imx);
             } else {
-                t = ntohl(pkt_dev->cur_tun_saddr);
+                t = pkt_dev->cur_tun_vni;
                 t++;
                 if (t > imx)
                     t = imn;
-
             }
+            pkt_dev->cur_tun_vni = t;
         }
     }
 

@@ -109,6 +109,7 @@ class Pktgen:
         self.stats = []
         if args.firstthread is not None:
             self.first_thread = int(args.firstthread)
+        self.thread_list = list(range(self.first_thread, self.first_thread + self.threads))
         if args.delay is not None:
             self.tx_delay = int(args.delay)
         if args.flows is not None:
@@ -143,10 +144,21 @@ class Pktgen:
                 cfg.read_string(config_string)
         else:
             return
+        if cfg.has_option('dummy', 'interface'):
+            self.pgdev = cfg.get('dummy', 'interface')
         if cfg.has_option('dummy', 'pkt_size'):
             self.pkt_size = cfg.getint('dummy', 'pkt_size')
         if cfg.has_option('dummy', 'pkt_num'):
             self.num = cfg.get_int('dummy', 'pkt_num')
+        if cfg.has_option('dummy', 'threads'):
+            self.thread_list = sum(((list(range(*[int(b) + c for c, b in enumerate(a.split('-'))]))
+                if '-' in a else [int(a)]) for a in cfg.get('dummy', 'threads').split(',')), [])
+            self.first_thread = self.thread_list[0]
+            self.threads = len(self.thread_list)
+        if cfg.has_option('dummy', 'bps_limit'):
+            self.bps_rate = cfg.get('dummy', 'bps_limit')
+        if cfg.has_option('dummy', 'pps_limit'):
+            self.pps_rate = cfg.get('dummy', 'pps_limit')
         if cfg.has_option('dummy', 'dst_ip'):
             self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(cfg.get('dummy', 'dst_ip'))
         if cfg.has_option('dummy', 'src_ip'):
@@ -339,7 +351,14 @@ class Pktgen:
 
     def __config_tun_meta(self, dev) -> None:
         if self.tun_vni is not None:
-            self.pg_set(dev, "tun_meta %06x" % int(self.tun_vni))
+            vni = self.tun_vni.split('-')
+            if len(vni) == 2:
+                vni_max = vni[1]
+            elif len(vni) == 1:
+                vni_max = vni[0]
+            vni_min = vni[0]
+            self.pg_set(dev, "tun_meta_min %06x" % int(vni_min))
+            self.pg_set(dev, "tun_meta_max %06x" % int(vni_max))
             self.pg_set(dev, "tun_udp_dst %d" % int(self.tun_udpport))
             if self.tun_src_min != "":
                 self.pg_set(dev, "tun_src_min %s" % self.tun_src_min)
@@ -367,10 +386,10 @@ class Pktgen:
         self.reset()
 
         # Threads are specified with parameter -t value in $THREADS
-        for i in range(self.first_thread, self.first_thread + self.threads):
+        for i in self.thread_list:
             if self.queue is True:
                 dev = "%s@%d" % (self.pgdev, self.cpu_list[i])
-                irq = self.irq_list[i - self.first_thread]
+                irq = self.irq_list[i]
                 self.__config_irq_affinity(irq, self.cpu_list[i])
             else:
                 # The device name is extended with @name, using thread id to
@@ -498,7 +517,7 @@ class Pktgen:
         total_err = 0
         if len(self.stats) == 0:
             need_init = True
-        for i in range(self.first_thread, self.first_thread + self.threads):
+        for i in self.thread_list:
             with open(self.__pg_get_devpath(i), "r") as fp_dev:
                 if last is False:
                     sg_pkts, sg_pps, sg_bps, sg_err = self.result_transient(
