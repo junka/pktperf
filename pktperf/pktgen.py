@@ -6,6 +6,7 @@ import sys
 import re
 import os
 import math
+import platform
 import ipaddress
 import subprocess
 import configparser
@@ -15,21 +16,28 @@ from .pktsar import PktSar
 def open_write_error(filename, flag, mode="r+"):
     """open and write a flag to file"""
     try:
-        with open(filename, mode, encoding='utf-8') as fp_dev:
+        with open(filename, mode, encoding="utf-8") as fp_dev:
             fp_dev.write("%s\n" % flag)
-    except IOError:
+    except IOError as exc:
         print("Error: Cannot open %s" % (filename))
-        raise Exception("Error writing flag %s", flag)
-        sys.exit(1)
+        raise IOError("Error writing flag %s" % flag) from exc
 
 
 def modinfo_check() -> str:
-    """ check module version """
-    p = subprocess.run(['modinfo', 'pktgen'], stdout=subprocess.PIPE, check=True)
+    """check module version"""
+    n = platform.uname()
+    depfile = "/lib/modules/%s/modules.dep" % n.release
+    try:
+        with open(depfile, "r", encoding="utf-8") as fp_dep:
+            fp_dep.readlines()
+    except IOError as exc:
+        print("Fail to open modules.dep, maybe you are not root privellge")
+        raise IOError("Error open modules.dep") from exc
+    p = subprocess.run(["modinfo", "pktgen"], stdout=subprocess.PIPE, check=True)
     if p.returncode != 0:
         return ""
-    ret = p.stdout.decode('utf-8')
-    ver = re.search(r'version:[\t\ ]+([\d\.]+)', ret)
+    ret = p.stdout.decode("utf-8")
+    ver = re.search(r"version:[\t\ ]+([\d\.]+)", ret)
     if ver is not None:
         return ver.group(1)
     return ""
@@ -85,7 +93,7 @@ class Pktgen:
         mod = "/proc/net/pktgen"
         is_exists = os.path.exists(mod)
         if is_exists is False:
-            print("No pktgen module\nPlease do \'modprobe pktgen\'")
+            print("No pktgen module\nPlease do 'modprobe pktgen'")
             sys.exit(0)
         self.pgdev = args.interface
         self.pkt_size = int(args.size)
@@ -109,7 +117,9 @@ class Pktgen:
         self.stats = []
         if args.firstthread is not None:
             self.first_thread = int(args.firstthread)
-        self.thread_list = list(range(self.first_thread, self.first_thread + self.threads))
+        self.thread_list = list(
+            range(self.first_thread, self.first_thread + self.threads)
+        )
         if args.delay is not None:
             self.tx_delay = int(args.delay)
         if args.flows is not None:
@@ -140,76 +150,97 @@ class Pktgen:
     def __read_config_file(self, file):
         cfg = configparser.ConfigParser()
         if file is not None:
-            with open(file, 'r') as f:
-                config_string = '[dummy]\n' + f.read()
+            with open(file, "r", encoding="utf-8") as f:
+                config_string = "[dummy]\n" + f.read()
                 cfg.read_string(config_string)
         else:
             return
-        if cfg.has_option('dummy', 'interface'):
-            self.pgdev = cfg.get('dummy', 'interface')
-        if cfg.has_option('dummy', 'pkt_size'):
-            self.pkt_size = cfg.getint('dummy', 'pkt_size')
-        if cfg.has_option('dummy', 'pkt_num'):
-            self.num = cfg.get_int('dummy', 'pkt_num')
-        if cfg.has_option('dummy', 'threads'):
-            self.thread_list = sum(((list(range(*[int(b) + c for c, b in enumerate(a.split('-'))]))
-                if '-' in a else [int(a)]) for a in cfg.get('dummy', 'threads').split(',')), [])
+        if cfg.has_option("dummy", "interface"):
+            self.pgdev = cfg.get("dummy", "interface")
+        if cfg.has_option("dummy", "pkt_size"):
+            self.pkt_size = cfg.getint("dummy", "pkt_size")
+        if cfg.has_option("dummy", "pkt_num"):
+            self.num = cfg.getint("dummy", "pkt_num")
+        if cfg.has_option("dummy", "threads"):
+            self.thread_list = sum(
+                (
+                    (
+                        list(range(*[int(b) + c for c, b in enumerate(a.split("-"))]))
+                        if "-" in a
+                        else [int(a)]
+                    )
+                    for a in cfg.get("dummy", "threads").split(",")
+                ),
+                [],
+            )
             self.first_thread = self.thread_list[0]
             self.threads = len(self.thread_list)
-        if cfg.has_option('dummy', 'bps_limit'):
-            self.bps_rate = cfg.get('dummy', 'bps_limit')
-        if cfg.has_option('dummy', 'pps_limit'):
-            self.pps_rate = cfg.get('dummy', 'pps_limit')
-        if cfg.has_option('dummy', 'burst'):
-            self.burst = cfg.getint('dummy', 'burst')
-        if cfg.has_option('dummy', 'imix_weight'):
-            self.clone = cfg.getint('dummy', 'clone')
-        if cfg.has_option('dummy', 'dst_ip'):
-            self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(cfg.get('dummy', 'dst_ip'))
-        if cfg.has_option('dummy', 'src_ip'):
-            self.src_ip_min, self.src_ip_max = self.__init_ip_input(cfg.get('dummy', 'src_ip'))
-        if cfg.has_option('dummy', 'dstmac'):
-            self.dst_mac = cfg.get('dummy', 'dstmac')
-        if cfg.has_option('dummy', 'vlan'):
-            self.vlan = cfg.get('dummy', 'vlan')
-        if cfg.has_option('dummy', 'svlan'):
-            self.svlan = cfg.get('dummy', 'svlan')
-        if cfg.has_option('dummy', 'udp_src_port'):
-            self.src_port_min, self.src_port_max = self.__init_port_range(cfg.get('dummy', 'udp_src_port'))
-        if cfg.has_option('dummy', 'udp_dst_port'):
-            self.dst_port_min, self.dst_port_max = self.__init_port_range(cfg.get('dummy', 'udp_dst_port'))
-        if cfg.has_option('dummy', 'tos'):
-            self.tos = cfg['tos']
-        if cfg.has_option('dummy', 'tun_vni'):
-            self.tun_vni = cfg.get('dummy', 'tun_vni')
-        if cfg.has_option('dummy', 'tun_udp_port'):
-            self.tun_udpport = cfg.get('dummy', 'tun_udp_port')
-        if cfg.has_option('dummy', 'tun_src_ip'):
-            self.tun_src_min, self.tun_src_max = self.__init_ip_input(cfg.get('dummy', 'tun_src_ip'))
-        if cfg.has_option('dummy', 'tun_dst_ip'):
-            self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(cfg.get('dummy', 'tun_dst_ip'))
-        if cfg.has_option('dummy', 'inner_dstmac'):
-            self.inner_dmac = cfg.get('dummy', 'inner_dstmac')
-        if cfg.has_option('dummy', 'inner_srcmac'):
-            self.inner_smac = cfg.get('dummy', 'inner_srcmac')
-        if cfg.has_option('dummy', 'inner_dmac_num'):
-            self.inner_dmac_count = cfg.getint('dummy', 'inner_dmac_num')
-        if cfg.has_option('dummy', 'inner_smac_num'):
-            self.inner_smac_count = cfg.getint('dummy', 'inner_smac_num')
-        if cfg.has_option('dummy', 'micro_burst'):
-            self.microburst = cfg.get('dummy', 'micro_burst')
-        if cfg.has_option('dummy', 'imix_weight'):
-            self.imixweight = cfg.get('dummy', 'imix_weight')
+        if cfg.has_option("dummy", "bps_limit"):
+            self.bps_rate = cfg.get("dummy", "bps_limit")
+        if cfg.has_option("dummy", "pps_limit"):
+            self.pps_rate = cfg.get("dummy", "pps_limit")
+        if cfg.has_option("dummy", "burst"):
+            self.burst = cfg.getint("dummy", "burst")
+        if cfg.has_option("dummy", "imix_weight"):
+            self.clone = cfg.getint("dummy", "clone")
+        if cfg.has_option("dummy", "dst_ip"):
+            self.dst_ip_min, self.dst_ip_max = self.__init_ip_input(
+                cfg.get("dummy", "dst_ip")
+            )
+        if cfg.has_option("dummy", "src_ip"):
+            self.src_ip_min, self.src_ip_max = self.__init_ip_input(
+                cfg.get("dummy", "src_ip")
+            )
+        if cfg.has_option("dummy", "dstmac"):
+            self.dst_mac = cfg.get("dummy", "dstmac")
+        if cfg.has_option("dummy", "vlan"):
+            self.vlan = cfg.get("dummy", "vlan")
+        if cfg.has_option("dummy", "svlan"):
+            self.svlan = cfg.get("dummy", "svlan")
+        if cfg.has_option("dummy", "udp_src_port"):
+            self.src_port_min, self.src_port_max = self.__init_port_range(
+                cfg.get("dummy", "udp_src_port")
+            )
+        if cfg.has_option("dummy", "udp_dst_port"):
+            self.dst_port_min, self.dst_port_max = self.__init_port_range(
+                cfg.get("dummy", "udp_dst_port")
+            )
+        if cfg.has_option("dummy", "tos"):
+            self.tos = cfg["tos"]
+        if cfg.has_option("dummy", "tun_vni"):
+            self.tun_vni = cfg.get("dummy", "tun_vni")
+        if cfg.has_option("dummy", "tun_udp_port"):
+            self.tun_udpport = cfg.get("dummy", "tun_udp_port")
+        if cfg.has_option("dummy", "tun_src_ip"):
+            self.tun_src_min, self.tun_src_max = self.__init_ip_input(
+                cfg.get("dummy", "tun_src_ip")
+            )
+        if cfg.has_option("dummy", "tun_dst_ip"):
+            self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(
+                cfg.get("dummy", "tun_dst_ip")
+            )
+        if cfg.has_option("dummy", "inner_dstmac"):
+            self.inner_dmac = cfg.get("dummy", "inner_dstmac")
+        if cfg.has_option("dummy", "inner_srcmac"):
+            self.inner_smac = cfg.get("dummy", "inner_srcmac")
+        if cfg.has_option("dummy", "inner_dmac_num"):
+            self.inner_dmac_count = cfg.getint("dummy", "inner_dmac_num")
+        if cfg.has_option("dummy", "inner_smac_num"):
+            self.inner_smac_count = cfg.getint("dummy", "inner_smac_num")
+        if cfg.has_option("dummy", "micro_burst"):
+            self.microburst = cfg.get("dummy", "micro_burst")
+        if cfg.has_option("dummy", "imix_weight"):
+            self.imixweight = cfg.get("dummy", "imix_weight")
 
     def __init_ip_input(self, ipstr):
-        """ Init pktgen module ip dst """
+        """Init pktgen module ip dst"""
         if ipstr is None:
             return "", ""
         net = None
         try:
             net = ipaddress.ip_network(ipstr, strict=False)
         except (ValueError, TypeError):
-            ip_list = ipstr.split('-')
+            ip_list = ipstr.split("-")
             try:
                 ip_min = ipaddress.ip_address(ip_list[0])
             except (ValueError, TypeError):
@@ -234,7 +265,7 @@ class Pktgen:
         port_max = 65535
         port_min = 65535
         if portrange is not None:
-            ports = portrange.split('-')
+            ports = portrange.split("-")
             if len(ports) == 2:
                 port_max = int(ports[1])
             elif len(ports) == 1:
@@ -262,6 +293,19 @@ class Pktgen:
             sys.exit(1)
         open_write_error(pgctrl, cmd)
 
+    @staticmethod
+    def pg_version() -> str:
+        pgctrl = "/proc/net/pktgen/pgctrl"
+        try:
+            with open(pgctrl, "r", encoding="utf-8") as f_ctl:
+                cont = f_ctl.read()
+                m = re.search(r"Version: (\d.\d+)", cont)
+        except IOError:
+            return ""
+        if m is not None:
+            return m.group(1)
+        return ""
+
     def pg_set(self, dev, flag) -> None:
         """pg_set control setup of individual devices"""
         if dev.find(self.pgdev) < 0:
@@ -271,7 +315,7 @@ class Pktgen:
         open_write_error(pgdev, flag)
 
     def __pg_get_devpath(self, index) -> str:
-        """ get dev path for thread index"""
+        """get dev path for thread index"""
         if self.queue is True:
             dev = "%s@%d" % (self.pgdev, self.cpu_list[index])
         else:
@@ -281,7 +325,7 @@ class Pktgen:
 
     @staticmethod
     def pg_thread(thread, cmd) -> None:
-        """pg_thread() control the kernel threads and binding to devices """
+        """pg_thread() control the kernel threads and binding to devices"""
         pgthread = "/proc/net/pktgen/kpktgend_%d" % thread
         if cmd != "rem_device_all" and cmd.find("add_device") != 0:
             print("pg_thread do not support cmd %s" % cmd)
@@ -290,18 +334,18 @@ class Pktgen:
 
     @staticmethod
     def os_check() -> bool:
-        """ check if os is linux """
+        """check if os is linux"""
         return os.name == "posix"
 
     def __config_irq_affinity(self, irq, thread):
-        """ config irq affinity """
+        """config irq affinity"""
         irq_path = "/proc/irq/%d/smp_affinity_list" % irq
         open_write_error(irq_path, thread)
         if self.debug is True:
             print("irq %d is set affinity to %d" % (irq, thread))
 
     def __config_tos(self, dev) -> None:
-        """config tos """
+        """config tos"""
         if self.tos is not None and self.tos != 0:
             if self.ipv6 is True:
                 self.pg_set(dev, "traffic_class %0x" % self.tos)
@@ -309,14 +353,14 @@ class Pktgen:
                 self.pg_set(dev, "tos %0x" % self.tos)
 
     def __config_vlan(self, dev) -> None:
-        """config vlan related parameter """
+        """config vlan related parameter"""
         if self.vlan is not None and 0 <= int(self.vlan) < 4096:
             self.pg_set(dev, "vlan_id %d" % int(self.vlan))
         if self.svlan is not None and 0 <= int(self.svlan) < 4096:
             self.pg_set(dev, "svlan_id %d" % int(self.svlan))
 
     def __config_udp_portrange(self, dev) -> None:
-        """config udp port range """
+        """config udp port range"""
         if self.dst_port_max is not None:
             # Single destination port or random port range
             self.pg_set(dev, "flag UDPDST_RND")
@@ -352,7 +396,8 @@ class Pktgen:
 
     def __config_imix(self, dev) -> None:
         if self.imixweight is not None:
-            self.pg_set(dev, "imix_weights %s" % self.imixweight.replace(",", " ").replace(":", ","))
+            weight = self.imixweight.replace(",", " ").replace(":", ",")
+            self.pg_set(dev, "imix_weights %s" % weight)
 
     def __config_microburst(self, dev) -> None:
         if self.microburst is not None:
@@ -360,7 +405,7 @@ class Pktgen:
 
     def __config_tun_meta(self, dev) -> None:
         if self.tun_vni is not None:
-            vni = self.tun_vni.split('-')
+            vni = self.tun_vni.split("-")
             if len(vni) == 2:
                 vni_max = vni[1]
             elif len(vni) == 1:
@@ -456,7 +501,7 @@ class Pktgen:
             self.__config_microburst(dev)
 
     def reset(self) -> None:
-        """ reset pktgen"""
+        """reset pktgen"""
         if self.append is False:
             self.pg_ctrl("reset")
 
@@ -471,17 +516,19 @@ class Pktgen:
 
     @staticmethod
     def result_last(core_id, fp_dev, print_cb):
-        """print last result """
+        """print last result"""
         tpkts = 0
         tpps = 0
         tbps = 0
         tbps = 0
         stats_content = fp_dev.read()
         result_field = re.compile(
-            r'Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)')
+            r"Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)"
+        )
         throughput_field = re.compile(
-            r'  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)')
-        unresult_field = re.compile(r'Result: (\w+)')
+            r"  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)"
+        )
+        unresult_field = re.compile(r"Result: (\w+)")
         res = result_field.search(stats_content)
         pkt = throughput_field.search(stats_content)
         if res is not None and pkt is not None:
@@ -489,9 +536,16 @@ class Pktgen:
             tpps = int(pkt.group(1))
             tbps = int(pkt.group(2))
             tbps = int(pkt.group(3))
-            print_cb("Core%3d send %18d pkts: %18d pps %18d bps %6d errors" %
-                     (core_id, int(res.group(2)), int(
-                         pkt.group(1)), int(pkt.group(2)), int(pkt.group(3))))
+            print_cb(
+                "Core%3d send %18d pkts: %18d pps %18d bps %6d errors"
+                % (
+                    core_id,
+                    int(res.group(2)),
+                    int(pkt.group(1)),
+                    int(pkt.group(2)),
+                    int(pkt.group(3)),
+                )
+            )
         else:
             other = unresult_field.search(stats_content)
             if other is not None:
@@ -499,10 +553,10 @@ class Pktgen:
         return tpkts, tpps, tbps, tbps
 
     def result_transient(self, need_init, core_id, fp_dev, print_cb):
-        """print result during """
+        """print result during"""
         stats_content = fp_dev.read()
-        sofar_field = re.compile(r'pkts-sofar: (\d+)  errors: (\d+)')
-        time_field = re.compile(r'started: (\d+)us  stopped: (\d+)us')
+        sofar_field = re.compile(r"pkts-sofar: (\d+)  errors: (\d+)")
+        time_field = re.compile(r"started: (\d+)us  stopped: (\d+)us")
         sofar = sofar_field.search(stats_content)
         tim = time_field.search(stats_content)
         if need_init is True:
@@ -514,13 +568,14 @@ class Pktgen:
             pkt_sar.update(int(sofar.group(1)), int(tim.group(2)))
             pps, bps = pkt_sar.get_stats()
             print_cb(
-                "Core%3d send %18d pkts: %18f pps %18f bps %6d errors" %
-                (core_id, int(sofar.group(1)), pps, bps, int(sofar.group(2))))
+                "Core%3d send %18d pkts: %18f pps %18f bps %6d errors"
+                % (core_id, int(sofar.group(1)), pps, bps, int(sofar.group(2)))
+            )
             return int(sofar.group(1)), pps, bps, int(sofar.group(2))
         return 0, 0, 0, 0
 
     def result(self, last, print_cb) -> int:
-        """ Print results """
+        """Print results"""
         if last is True:
             print("%d cores enabled" % self.threads)
         need_init = False
@@ -534,53 +589,57 @@ class Pktgen:
             with open(self.__pg_get_devpath(i), "r") as fp_dev:
                 if last is False:
                     sg_pkts, sg_pps, sg_bps, sg_err = self.result_transient(
-                        need_init, i, fp_dev, print_cb)
+                        need_init, i, fp_dev, print_cb
+                    )
                 else:
                     sg_pkts, sg_pps, sg_bps, sg_err = self.result_last(
-                        i, fp_dev, print_cb)
+                        i, fp_dev, print_cb
+                    )
                 total_pkts += sg_pkts
                 total_pps += sg_pps
                 total_bps += sg_bps
                 total_err += sg_err
-        print_cb("Total   send %18d pkts: %18d pps %18d bps %6d errors" %
-                 (total_pkts, total_pps, total_bps, total_err))
+        print_cb(
+            "Total   send %18d pkts: %18d pps %18d bps %6d errors"
+            % (total_pkts, total_pps, total_bps, total_err)
+        )
         if last is False and self.num > 0 and total_pkts >= self.num:
             return 1
         return 0
 
     def __get_dev_numa(self) -> int:
-        """ __get_dev_numa returns the numa node of the device"""
+        """__get_dev_numa returns the numa node of the device"""
         numa_path = "/sys/class/net/%s/device/numa_node" % self.pgdev
         try:
             with open(numa_path, "r") as fp_numa:
-                node = fp_numa.read().rstrip('\n')
+                node = fp_numa.read().rstrip("\n")
         except IOError:
             print("Error: Cannot open %s" % (numa_path))
             return 0
-        if node == '-1':
+        if node == "-1":
             return 0
         return int(node)
 
     @staticmethod
     def __node_cpu_list(node) -> list:
-        """ __node_cpu_list returns the cpu list of the node """
+        """__node_cpu_list returns the cpu list of the node"""
         cpu_list = "/sys/devices/system/node/node%d/cpulist" % node
         try:
-            with open(cpu_list, 'r') as fp_cpu:
+            with open(cpu_list, "r") as fp_cpu:
                 cpu_range = fp_cpu.read()
         except IOError:
             print("Error: Cannot open %s" % (cpu_list))
             sys.exit(-1)
-        ranges = cpu_range.split(',')
+        ranges = cpu_range.split(",")
         ret = []
         for i in ranges:
-            cpu_start, cpu_end = i.split('-')
+            cpu_start, cpu_end = i.split("-")
             for j in range(int(cpu_start), int(cpu_end) + 1):
                 ret.append(j)
         return ret
 
     def __get_irqs(self):
-        """ read out irqs """
+        """read out irqs"""
         proc_intr = "/proc/interrupts"
         msi_irqs = "/sys/class/net/%s/device/msi_irqs" % self.pgdev
         try:
@@ -590,15 +649,15 @@ class Pktgen:
             return []
         irqs = []
         devq_irq = re.compile(
-            r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+' % (self.pgdev))
+            r"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+" % (self.pgdev)
+        )
         match = devq_irq.finditer(intrs)
         print(match)
         if len(devq_irq.findall(intrs)) > 0:
             for i in match:
                 irqs.append(int(i.group(1)))
             return irqs
-        dev_irq = re.compile(r'(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-\d+' %
-                             (self.pgdev))
+        dev_irq = re.compile(r"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-\d+" % (self.pgdev))
         match = dev_irq.finditer(intrs)
         if len(dev_irq.findall(intrs)) > 0:
             for i in match:
@@ -607,7 +666,7 @@ class Pktgen:
         try:
             dirs = os.listdir(msi_irqs)
             for dev_q in dirs:
-                msi_irq = re.compile(r'%s:.*TxRx' % dev_q)
+                msi_irq = re.compile(r"%s:.*TxRx" % dev_q)
                 match = msi_irq.search(intrs)
                 if match is not None:
                     irqs.append(int(dev_q))

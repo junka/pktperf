@@ -12,7 +12,7 @@ class PktSar:
     """
 
     def __init__(self, start_time: int, pkt_size: int) -> None:
-        """ init sar stats """
+        """init sar stats"""
         self.start = start_time
         self._pkts = 0
         self._pkt_size = pkt_size
@@ -22,7 +22,7 @@ class PktSar:
         self.bps = 0.0
 
     def update(self, pkts_so_far, timestamp):
-        """ update stats """
+        """update stats"""
         diff_pkts = pkts_so_far - self._pkts
         self._pkts = pkts_so_far
         diff_time = (timestamp - self.last_update) / 1000000
@@ -36,5 +36,5 @@ class PktSar:
                 self.bps = self.pps * (self._pkt_size + 4)
 
     def get_stats(self):
-        """ get stats """
+        """get stats"""
         return self.pps, self.bps
