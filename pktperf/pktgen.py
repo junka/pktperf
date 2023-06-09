@@ -146,6 +146,10 @@ class Pktgen:
         self.microburst = args.microburst
         self.imixweight = args.imix
         self.__read_config_file(args.file)
+        if self.pgdev is None:
+            raise Exception("No interface specified")
+        if self.dst_ip_min == "":
+            raise Exception("No dst ip specified")
 
     def __read_config_file(self, file):
         cfg = configparser.ConfigParser()

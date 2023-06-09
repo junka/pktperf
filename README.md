@@ -54,10 +54,10 @@ packets sent.
 
 micro burst test case:
 
-```microburst duration_wait,duration_send```
+```microburst duration_poll,duration_idle```
 
 ```
-microbust 200,100
+microburst 200,100
 
 pktgen will be sending 200ms and then keep 100ms idle, loop follow the pattern
 ```
