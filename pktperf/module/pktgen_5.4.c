@@ -157,6 +157,7 @@
 #include <net/checksum.h>
 #include <net/ipv6.h>
 #include <net/udp.h>
+#include <net/tcp.h>
 #include <net/ip6_checksum.h>
 #include <net/addrconf.h>
 #ifdef CONFIG_XFRM
@@ -539,6 +540,19 @@ struct pktgen_net {
     bool            pktgen_exiting;
 };
 
+struct tcp_state {
+    __u64 retransmits;
+    __u32 flow_state;
+    __u32 seq;     /* our last sent seqno */
+    __u32 ack_seq; /* last seqno that got acked */
+    __u32 rcv_seq; /* receiver's seqno (our ACK seq) */
+
+    __u32 highest_seq;
+    __u16 window;
+    __u8 wscale;
+};
+
+
 struct pktgen_thread {
     struct mutex if_lock;        /* for list of devices */
     struct list_head if_list;    /* All device here */
@@ -555,6 +569,7 @@ struct pktgen_thread {
     wait_queue_head_t queue;
     struct completion start_done;
     struct pktgen_net *net;
+    struct tcp_state tcp_state;
 };
 
 #define REMOVE 1
@@ -3432,6 +3447,22 @@ static void fill_udp_layer(struct sk_buff *skb,
     }    
     udph->len = htons(datalen + 8);    /* DATA + udphdr */
     udph->check = 0;
+}
+
+static void fill_tcp_syn(struct sk_buff *skb, struct tcphdr *tcph,
+                         struct pktgen_dev *pkt_dev, int datalen)
+{
+    tcph->source = htons(pkt_dev->cur_udp_src);
+    tcph->dest = htons(pkt_dev->cur_udp_dst);
+    // tcph->len = htons(datalen + 8); /* DATA + udphdr */
+    tcph->check = 0;
+    tcph->seq = 0;
+    tcph->ack_seq = 0;
+    tcph->window = htons(0x100);
+    tcph->urg_ptr = 0;
+    tcph->syn = 1;
+    tcph->doff = 5;
+    tcph->res1 = 0;
 }
 
 static void fill_ipv6_layer(struct ipv6hdr *iph, struct pktgen_dev *pkt_dev,
