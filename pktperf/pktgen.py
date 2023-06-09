@@ -229,6 +229,7 @@ class Pktgen:
             self.inner_smac_count = cfg.getint("dummy", "inner_smac_num")
         if cfg.has_option("dummy", "micro_burst"):
             self.microburst = cfg.get("dummy", "micro_burst")
+            self.burst = 0
         if cfg.has_option("dummy", "imix_weight"):
             self.imixweight = cfg.get("dummy", "imix_weight")
 
@@ -399,9 +400,13 @@ class Pktgen:
             weight = self.imixweight.replace(",", " ").replace(":", ",")
             self.pg_set(dev, "imix_weights %s" % weight)
 
-    def __config_microburst(self, dev) -> None:
+    def __config_burst_mode(self, dev) -> None:
         if self.microburst is not None:
             self.pg_set(dev, "micro_burst %s" % self.microburst)
+            self.burst = 0
+        # hw burst
+        if self.burst is not None and self.burst > 0:
+            self.pg_set(dev, "burst %d" % self.burst)
 
     def __config_tun_meta(self, dev) -> None:
         if self.tun_vni is not None:
@@ -491,14 +496,10 @@ class Pktgen:
             self.__config_udp_portrange(dev)
             self.__config_vlan(dev)
 
-            # hw burst
-            if self.burst is not None and self.burst > 0:
-                self.pg_set(dev, "burst %d" % self.burst)
-
             self.__config_ratelimit(dev)
 
             self.__config_imix(dev)
-            self.__config_microburst(dev)
+            self.__config_burst_mode(dev)
 
     def reset(self) -> None:
         """reset pktgen"""
