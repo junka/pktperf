@@ -145,6 +145,7 @@ class Pktgen:
         self.inner_smac_count = 0
         self.microburst = args.microburst
         self.imixweight = args.imix
+        self.tcp = None
         self.__read_config_file(args.file)
         if self.pgdev is None:
             raise Exception("No interface specified")
@@ -236,6 +237,8 @@ class Pktgen:
             self.burst = 0
         if cfg.has_option("dummy", "imix_weight"):
             self.imixweight = cfg.get("dummy", "imix_weight")
+        if cfg.has_option("dummy", "tcp_syn"):
+            self.tcp = cfg.get("dummy", "tcp_syn")
 
     def __init_ip_input(self, ipstr):
         """Init pktgen module ip dst"""
@@ -504,6 +507,11 @@ class Pktgen:
 
             self.__config_imix(dev)
             self.__config_burst_mode(dev)
+            node = self.__get_dev_numa()
+            self.pg_set(dev, "node %d" % node)
+            if self.tcp is not None:
+                self.pg_set(dev, "tcp_syn %s" % self.tcp)
+                self.pg_set(dev, "flag UDPCSUM")
 
     def reset(self) -> None:
         """reset pktgen"""

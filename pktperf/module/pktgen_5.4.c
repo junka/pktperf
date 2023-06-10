@@ -276,6 +276,10 @@ static char *pkt_flag_names[] = {
 #define M_NETIF_RECEIVE     1    /* Inject packets into stack */
 #define M_QUEUE_XMIT        2    /* Inject packet into qdisc */
 
+/* tcp modes */
+#define M_SYN_SENT  1
+#define M_SYN_ACK   2
+
 /* If lock -- protects updating of if_list */
 #define if_lock(t)    mutex_lock(&(t->if_lock));
 #define if_unlock(t)  mutex_unlock(&(t->if_lock));
@@ -513,6 +517,7 @@ struct pktgen_dev {
     unsigned int burst;    /* number of duplicated packets to burst */
     int node;               /* Memory node */
 
+    int tcp_mode;
 #ifdef CONFIG_XFRM
     __u8    ipsmode;        /* IPSEC mode (config) */
     __u8    ipsproto;        /* IPSEC type (config) */
@@ -1228,6 +1233,30 @@ static ssize_t pktgen_if_write(struct file *file,
         pkt_dev->pause_time = value;
         sprintf(pg_result, "OK: micro_burst=%u,%u", pkt_dev->poll_time,
                 pkt_dev->pause_time);
+        return count;
+    }
+
+    if (!strcmp(name, "syn_flood") || !strcmp(name, "tcp_syn")) {
+        char f[32];
+
+        memset(f, 0, 32);
+        len = strn_len(&user_buffer[i], sizeof(f) - 1);
+        if (len < 0)
+            return len;
+
+        if (copy_from_user(f, &user_buffer[i], len))
+            return -EFAULT;
+        i += len;
+        if (!strcmp(f, "syn")) {
+            pkt_dev->tcp_mode = M_SYN_SENT;
+        } else if (!strcmp(f, "syn_ack")) {
+            pkt_dev->tcp_mode = M_SYN_ACK;
+        } else {
+            sprintf(pg_result, "tcp syn mode -:%s:- unknown\nAvailable modes: %s",
+                    f, "syn, syn_ack\n");
+            return count;
+        }
+        sprintf(pg_result, "OK: syn_flood=%s", f);
         return count;
     }
 
@@ -3404,12 +3433,12 @@ static void fill_skb_vlan(struct sk_buff *skb, struct pktgen_dev *pkt_dev)
 static void fill_ipv4_layer(struct iphdr *iph, struct pktgen_dev *pkt_dev,
                      int datalen, bool tun)
 {
-    int iplen;
+    int iplen = 20 + 8 + datalen;
     iph->ihl = 5;
     iph->version = 4;
     iph->ttl = 32;
     iph->tos = pkt_dev->tos;
-    iph->protocol = IPPROTO_UDP;    /* UDP */
+    iph->protocol = IPPROTO_UDP; /* UDP */
     if (tun) {
         iph->saddr = pkt_dev->cur_tun_saddr;
         iph->daddr = pkt_dev->cur_tun_daddr;
@@ -3420,9 +3449,12 @@ static void fill_ipv4_layer(struct iphdr *iph, struct pktgen_dev *pkt_dev,
         iph->daddr = pkt_dev->cur_daddr;
         iph->id = htons(pkt_dev->ip_id);
         pkt_dev->ip_id ++;
+        if (pkt_dev->tcp_mode) {
+            iph->protocol = IPPROTO_TCP;
+            iplen = 20 + datalen + sizeof(struct tcphdr);
+        }
     }
     iph->frag_off = 0;
-    iplen = 20 + 8 + datalen;
     iph->tot_len = htons(iplen);
     ip_send_check(iph);
 }
@@ -3454,13 +3486,23 @@ static void fill_tcp_syn(struct sk_buff *skb, struct tcphdr *tcph,
 {
     tcph->source = htons(pkt_dev->cur_udp_src);
     tcph->dest = htons(pkt_dev->cur_udp_dst);
-    // tcph->len = htons(datalen + 8); /* DATA + udphdr */
     tcph->check = 0;
     tcph->seq = 0;
     tcph->ack_seq = 0;
-    tcph->window = htons(0x100);
+    tcph->window = htons(0x4000);
     tcph->urg_ptr = 0;
     tcph->syn = 1;
+    if (pkt_dev->tcp_mode == M_SYN_ACK) {\
+        tcph->ack = 1;
+    } else {
+        tcph->ack = 0;
+    }
+    tcph->urg = 0;
+    tcph->ece = 0;
+    tcph->fin = 0;
+    tcph->psh = 0;
+    tcph->cwr = 0;
+    tcph->rst = 0;
     tcph->doff = 5;
     tcph->res1 = 0;
 }
@@ -3486,10 +3528,12 @@ static void fill_ipv6_layer(struct ipv6hdr *iph, struct pktgen_dev *pkt_dev,
     } else {
         iph->daddr = pkt_dev->cur_in6_daddr;
         iph->saddr = pkt_dev->cur_in6_saddr;
+        if (pkt_dev->tcp_mode) {
+            iph->nexthdr = IPPROTO_TCP;
+        }
     }
 
 }
-
 
 static void fill_ipv4_csum(struct net_device *odev, struct pktgen_dev *pkt_dev,
                     struct sk_buff *skb, int datalen,
@@ -3510,6 +3554,29 @@ static void fill_ipv4_csum(struct net_device *odev, struct pktgen_dev *pkt_dev,
 
         if (udph->check == 0)
             udph->check = CSUM_MANGLED_0;
+    }
+}
+
+static void fill_ipv4_tcp_csum(struct net_device *odev, struct pktgen_dev *pkt_dev,
+                           struct sk_buff *skb, int datalen, struct iphdr *iph,
+                           struct tcphdr *tcph) {
+    if (!(pkt_dev->flags & F_UDPCSUM)) {
+        skb->ip_summed = CHECKSUM_NONE;
+    } else if (odev->features & (NETIF_F_HW_CSUM | NETIF_F_IP_CSUM)) {
+        skb->ip_summed = CHECKSUM_PARTIAL;
+        skb->csum = ~tcp_v4_check(skb->len, iph->saddr, iph->daddr, 0);
+        skb->csum_start = skb_transport_header(skb) - skb->head;
+        skb->csum_offset = offsetof(struct tcphdr, check);
+    } else {
+        __wsum csum = skb_checksum(skb, skb_transport_offset(skb),
+                                   datalen + sizeof(struct tcphdr), 0);
+
+        /* add protocol-dependent pseudo-header */
+        tcph->check = csum_tcpudp_magic(iph->saddr, iph->daddr, datalen + sizeof(struct tcphdr),
+                                        IPPROTO_TCP, csum);
+
+        if (tcph->check == 0)
+            tcph->check = CSUM_MANGLED_0;
     }
 }
 
@@ -3554,6 +3621,7 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
     struct sk_buff *skb = NULL;
     __u8 *eth;
     struct udphdr *udph;
+    struct tcphdr *tcph;
     int datalen;
     struct iphdr *iph;
     __be16 protocol = htons(ETH_P_IP);
@@ -3591,19 +3659,32 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
     iph = skb_put(skb, sizeof(struct iphdr));
 
     skb_set_transport_header(skb, skb->len);
-    udph = skb_put(skb, sizeof(struct udphdr));
+    if (pkt_dev->tcp_mode) {
+        tcph = skb_put(skb, sizeof(struct tcphdr));
+    } else {
+        udph = skb_put(skb, sizeof(struct udphdr));
+    }
     skb_set_queue_mapping(skb, queue_map);
     skb->priority = pkt_dev->skb_priority;
 
     fill_ether_layer(eth, pkt_dev, protocol, false);
 
     /* Eth + IPh + UDPh + mpls */
-    datalen = pkt_dev->cur_pkt_size - 14 - 20 - 8 -
+    datalen = pkt_dev->cur_pkt_size - 14 - 20 -
           pkt_dev->pkt_overhead;
+    if (pkt_dev->tcp_mode) {
+        datalen -= sizeof(struct tcphdr);
+    } else {
+        datalen -= 8;
+    }
     if (datalen < 0 || datalen < sizeof(struct pktgen_hdr))
         datalen = sizeof(struct pktgen_hdr);
 
-    fill_udp_layer(skb, udph, pkt_dev, datalen, false);
+    if (pkt_dev->tcp_mode) {
+        fill_tcp_syn(skb, tcph, pkt_dev, datalen);
+    } else {
+        fill_udp_layer(skb, udph, pkt_dev, datalen, false);
+    }
     fill_ipv4_layer(iph, pkt_dev, datalen, false);
 
     skb->protocol = protocol;
@@ -3611,9 +3692,11 @@ static struct sk_buff *fill_packet_ipv4(struct net_device *odev,
     skb->pkt_type = PACKET_HOST;
 
     pktgen_finalize_skb(pkt_dev, skb, datalen);
-
-    fill_ipv4_csum(odev, pkt_dev, skb, datalen, iph, udph);
-
+    if (pkt_dev->tcp_mode) {
+        fill_ipv4_tcp_csum(odev, pkt_dev, skb, datalen, iph, tcph);
+    } else {
+        fill_ipv4_csum(odev, pkt_dev, skb, datalen, iph, udph);
+    }
 #ifdef CONFIG_XFRM
     if (!process_ipsec(pkt_dev, skb, protocol))
         return NULL;
@@ -3634,6 +3717,7 @@ static void fill_inner_packet(struct sk_buff *skb, struct pktgen_dev *pkt_dev,
     __be16 protocol = htons(ETH_P_IPV6);
     __u8 *inner_eth;
     struct udphdr *inner_udph;
+    struct tcphdr *inner_tcph;
     struct iphdr *inner_iph;
     struct ipv6hdr *inner_iph6;
 
@@ -3644,7 +3728,12 @@ static void fill_inner_packet(struct sk_buff *skb, struct pktgen_dev *pkt_dev,
         protocol = htons(ETH_P_IP);
         inner_iph = skb_put(skb, sizeof(struct iphdr));
     }
-    inner_udph = skb_put(skb, sizeof(struct udphdr));
+
+    if (pkt_dev->tcp_mode) {
+        inner_tcph = skb_put(skb, sizeof(struct tcphdr));
+    } else {
+        inner_udph = skb_put(skb, sizeof(struct udphdr));
+    }
 
     fill_ether_layer(inner_eth, pkt_dev, protocol, true);
     if (pkt_dev->flags & F_IPV6) {
@@ -3652,7 +3741,12 @@ static void fill_inner_packet(struct sk_buff *skb, struct pktgen_dev *pkt_dev,
     } else {
         fill_ipv4_layer(inner_iph, pkt_dev, data_len, false);
     }
-    fill_udp_layer(skb, inner_udph, pkt_dev, data_len, false);
+
+    if (pkt_dev->tcp_mode) {
+        fill_tcp_syn(skb, inner_tcph, pkt_dev, data_len);
+    } else {
+        fill_udp_layer(skb, inner_udph, pkt_dev, data_len, false);
+    }
 }
 
 static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
@@ -3709,7 +3803,12 @@ static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
     /* Eth + IPh + UDPh + mpls */
     datalen = pkt_dev->cur_pkt_size - 14 - 20 - 8 - pkt_dev->pkt_overhead;
     /* vxlan + ether + ip + udp */
-    inner_datalen = datalen - 8 - 14 - 20 - 8;
+    inner_datalen = datalen - 8 - 14 - 20;
+    if (pkt_dev->tcp_mode) {
+        inner_datalen -= sizeof(struct tcphdr);
+    } else {
+        inner_datalen -= 8;
+    }
     if (datalen < 0 || datalen < sizeof(struct pktgen_hdr))
         datalen = sizeof(struct pktgen_hdr) + 50;
     if (inner_datalen < 0 || inner_datalen < sizeof(struct pktgen_hdr))
@@ -3727,7 +3826,6 @@ static struct sk_buff *fill_tun_packet_ipv4(struct net_device *odev,
 
     pktgen_finalize_skb(pkt_dev, skb, inner_datalen);
 
-    //fill_ipv4_csum(odev, pkt_dev, skb, inner_datalen, inner_iph, inner_udph);
     fill_ipv4_csum(odev, pkt_dev, skb, datalen, iph, udph);
 
 #ifdef CONFIG_XFRM
@@ -3745,6 +3843,7 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
     struct sk_buff *skb = NULL;
     __u8 *eth;
     struct udphdr *udph;
+    struct tcphdr *tcph;
     int datalen;
     struct ipv6hdr *iph;
     __be16 protocol = htons(ETH_P_IPV6);
@@ -3782,7 +3881,11 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
     iph = skb_put(skb, sizeof(struct ipv6hdr));
 
     skb_set_transport_header(skb, skb->len);
-    udph = skb_put(skb, sizeof(struct udphdr));
+    if (pkt_dev->tcp_mode) {
+        tcph = skb_put(skb, sizeof(struct tcphdr));
+    } else {
+        udph = skb_put(skb, sizeof(struct udphdr));
+    }
     skb_set_queue_mapping(skb, queue_map);
     skb->priority = pkt_dev->skb_priority;
 
@@ -3790,15 +3893,23 @@ static struct sk_buff *fill_packet_ipv6(struct net_device *odev,
 
     /* Eth + IPh + UDPh + mpls */
     datalen = pkt_dev->cur_pkt_size - 14 -
-          sizeof(struct ipv6hdr) - sizeof(struct udphdr) -
+          sizeof(struct ipv6hdr) -
           pkt_dev->pkt_overhead;
-
+    if (pkt_dev->tcp_mode) {
+        datalen -= sizeof(struct tcphdr);
+    } else {
+        datalen -= sizeof(struct udphdr);
+    }
     if (datalen < 0 || datalen < sizeof(struct pktgen_hdr)) {
         datalen = sizeof(struct pktgen_hdr);
         net_info_ratelimited("increased datalen to %d\n", datalen);
     }
 
-    fill_udp_layer(skb, udph, pkt_dev, datalen, false);
+    if (pkt_dev->tcp_mode) {
+        fill_tcp_syn(skb, tcph, pkt_dev, datalen);
+    } else {
+        fill_udp_layer(skb, udph, pkt_dev, datalen, false);
+    }
     fill_ipv6_layer(iph, pkt_dev, datalen, false);
 
     skb->protocol = protocol;
@@ -3871,7 +3982,12 @@ static struct sk_buff *fill_tun_packet_ipv6(struct net_device *odev,
           sizeof(struct ipv6hdr) - sizeof(struct udphdr) -
           pkt_dev->pkt_overhead;
     /* vxlan + ether + ip6 + udp */
-    inner_datalen = datalen - 8 - 14 - 40 - 8;
+    inner_datalen = datalen - 8 - 14 - 40;
+    if (pkt_dev->tcp_mode) {
+        inner_datalen -= sizeof(struct tcphdr);
+    } else {
+        inner_datalen -= sizeof(struct udphdr);
+    }
 
     if (datalen < 0 || datalen < sizeof(struct pktgen_hdr)) {
         datalen = sizeof(struct pktgen_hdr) + 70;
