@@ -107,6 +107,7 @@ class Pktgen:
         self.debug = args.debug
         self.verbose = args.verbose
         self.append = args.append
+        self.clone = None
         if args.clone is not None:
             self.clone = int(args.clone)
         self.num = int(args.num)
@@ -146,6 +147,7 @@ class Pktgen:
         self.microburst = args.microburst
         self.imixweight = args.imix
         self.tcp = None
+        self.mode = None
         self.__read_config_file(args.file)
         if self.pgdev is None:
             raise Exception("No interface specified")
@@ -239,6 +241,10 @@ class Pktgen:
             self.imixweight = cfg.get("dummy", "imix_weight")
         if cfg.has_option("dummy", "tcp_syn"):
             self.tcp = cfg.get("dummy", "tcp_syn")
+        if cfg.has_option("dummy", "mode"):
+            self.mode = cfg.get("dummy", "mode")
+            if self.mode == "netif_receive" and self.clone is not None:
+                self.clone = None
 
     def __init_ip_input(self, ipstr):
         """Init pktgen module ip dst"""
@@ -485,7 +491,8 @@ class Pktgen:
 
             # Base config of dev
             self.pg_set(dev, "count %d" % math.ceil(self.num / self.threads))
-            self.pg_set(dev, "clone_skb %d" % self.clone)
+            if self.clone is not None:
+                self.pg_set(dev, "clone_skb %d" % self.clone)
             self.pg_set(dev, "pkt_size %d" % self.pkt_size)
             if self.frags is not None and self.frags != 1:
                 self.pg_set(dev, "frags %d" % self.frags)
@@ -512,6 +519,8 @@ class Pktgen:
             if self.tcp is not None:
                 self.pg_set(dev, "tcp_syn %s" % self.tcp)
                 self.pg_set(dev, "flag UDPCSUM")
+            if self.mode is not None:
+                self.pg_set(dev, "xmit_mode %s" % self.mode)
 
     def reset(self) -> None:
         """reset pktgen"""
