@@ -116,6 +116,7 @@ class Pktgen:
         if args.threads is not None:
             self.threads = int(args.threads)
         self.stats = []
+        self.rxstats = []
         if args.firstthread is not None:
             self.first_thread = int(args.firstthread)
         self.thread_list = list(
@@ -168,7 +169,7 @@ class Pktgen:
             self.pkt_size = cfg.getint("dummy", "pkt_size")
         if cfg.has_option("dummy", "pkt_num"):
             self.num = cfg.getint("dummy", "pkt_num")
-        if cfg.has_option("dummy", "threads"):
+        if cfg.has_option("dummy", "cpulist"):
             self.thread_list = sum(
                 (
                     (
@@ -176,7 +177,7 @@ class Pktgen:
                         if "-" in a
                         else [int(a)]
                     )
-                    for a in cfg.get("dummy", "threads").split(",")
+                    for a in cfg.get("dummy", "cpulist").split(",")
                 ),
                 [],
             )
@@ -545,7 +546,7 @@ class Pktgen:
         tbps = 0
         stats_content = fp_dev.read()
         result_field = re.compile(
-            r"Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \(\d+byte,\d+frags\)"
+            r"Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \((\d+)byte,\d+frags\)"
         )
         throughput_field = re.compile(
             r"  (\d+)pps \d+Mb\/sec \((\d+)bps\) errors: (\d+)"
@@ -554,47 +555,65 @@ class Pktgen:
         res = result_field.search(stats_content)
         pkt = throughput_field.search(stats_content)
         if res is not None and pkt is not None:
-            tpkts = int(res.group(2))
+            tpkt = int(res.group(2))
             tpps = int(pkt.group(1))
             tbps = int(pkt.group(2))
-            tbps = int(pkt.group(3))
+            tbyt = tpkts * int(res.group(3))
             print_cb(
-                "Core%3d send %18d pkts: %18d pps %18d bps %6d errors"
-                % (
-                    core_id,
-                    int(res.group(2)),
-                    int(pkt.group(1)),
-                    int(pkt.group(2)),
-                    int(pkt.group(3)),
-                )
+                "Core%3d send %18d pkts: %18d pps %18d bps %6d bytes"
+                % (core_id, tpkt, tpps, tbps, tbyt)
             )
         else:
             other = unresult_field.search(stats_content)
             if other is not None:
                 print_cb("Core%3d %s" % (core_id, other.group(1)))
-        return tpkts, tpps, tbps, tbps
+        return tpkts, tpps, tbps, tbps, 0, 0, 0, 0
 
     def result_transient(self, need_init, core_id, fp_dev, print_cb):
         """print result during"""
         stats_content = fp_dev.read()
         sofar_field = re.compile(r"pkts-sofar: (\d+)  errors: (\d+)")
+        rx_field = re.compile(r"pkts-rx: (\d+)  bytes: (\d+)")
         time_field = re.compile(r"started: (\d+)us  stopped: (\d+)us")
         sofar = sofar_field.search(stats_content)
+        rx = rx_field.search(stats_content)
         tim = time_field.search(stats_content)
         if need_init is True:
             pkt_sar = PktSar(int(tim.group(1)), self.pkt_size)
+            rx_sar = PktSar(int(tim.group(1)))
             self.stats.append(pkt_sar)
+            self.rxstats.append(rx_sar)
         else:
             pkt_sar = self.stats[core_id - self.first_thread]
+            rx_sar = self.rxstats[0]
+        tpps = 0
+        tbps = 0
+        rpps = 0
+        rbps = 0
+        tbyt = 0
+        tpkt = 0
+        rpkt = 0
+        rbyt = 0
         if sofar is not None:
-            pkt_sar.update(int(sofar.group(1)), int(tim.group(2)))
-            pps, bps = pkt_sar.get_stats()
+            tpkt = int(sofar.group(1))
+            tbyt = tpkt * pkt_sar._pkt_size
+            pkt_sar.update(tpkt, int(tim.group(2)), 0)
+            tpps, tbps = pkt_sar.get_stats()
             print_cb(
-                "Core%3d send %18d pkts: %18f pps %18f bps %6d errors"
-                % (core_id, int(sofar.group(1)), pps, bps, int(sofar.group(2)))
+                "Core%3d TX %18d pkts: %18f pps %18f bps %6d bytes"
+                % (core_id, tpkt, tpps, tbps, tbyt)
             )
-            return int(sofar.group(1)), pps, bps, int(sofar.group(2))
-        return 0, 0, 0, 0
+        if rx is not None:
+            rpkt = int(rx.group(1))
+            rbyt = int(rx.group(2))
+            rx_sar.update(rpkt, int(tim.group(2)), rbyt)
+            rpps, rbps = rx_sar.get_stats()
+            print_cb(
+                "Core%3d RX %18d pkts: %18f pps %18f bps %6d bytes"
+                % (core_id, rpkt, rpps, rbps, rbyt)
+            )
+        
+        return tpkt, tpps, tbps, tbyt, rpkt, rpps, rbps, rbyt
 
     def result(self, last, print_cb) -> int:
         """Print results"""
@@ -604,26 +623,26 @@ class Pktgen:
         total_pkts = 0
         total_pps = 0
         total_bps = 0
-        total_err = 0
+        total_bytes = 0
         if len(self.stats) == 0:
             need_init = True
         for i in self.thread_list:
             with open(self.__pg_get_devpath(i), "r") as fp_dev:
                 if last is False:
-                    sg_pkts, sg_pps, sg_bps, sg_err = self.result_transient(
+                    sg_pkts, sg_pps, sg_bps, sg_bytes, rg_pkts, rg_pps, rg_bps, rg_bytes = self.result_transient(
                         need_init, i, fp_dev, print_cb
                     )
                 else:
-                    sg_pkts, sg_pps, sg_bps, sg_err = self.result_last(
+                    sg_pkts, sg_pps, sg_bps, sg_bytes, rg_pkts, rg_pps, rg_bps, rg_bytes = self.result_last(
                         i, fp_dev, print_cb
                     )
                 total_pkts += sg_pkts
                 total_pps += sg_pps
                 total_bps += sg_bps
-                total_err += sg_err
+                total_bytes += sg_bytes
         print_cb(
-            "Total   send %18d pkts: %18d pps %18d bps %6d errors"
-            % (total_pkts, total_pps, total_bps, total_err)
+            "Total   TX %18d pkts: %18d pps %18d bps %6d bytes"
+            % (total_pkts, total_pps, total_bps, total_bytes)
         )
         if last is False and self.num > 0 and total_pkts >= self.num:
             return 1

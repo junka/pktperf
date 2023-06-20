@@ -173,6 +173,9 @@
 #include <asm/dma.h>
 #include <asm/div64.h>        /* do_div */
 #include <linux/version.h>
+#include <linux/percpu.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(6, 1, 0)
 #define PRANDOM32_INCLUSIVE(a, b) (prandom_u32() % (b - a) + a)
@@ -319,6 +322,14 @@ struct flow_state {
 /* flow flag bits */
 #define F_INIT   (1<<0)        /* flow has been initialized */
 
+struct pktgen_rx {
+    u64 rx_packets; /*packets arrived*/
+    u64 rx_bytes;   /*bytes arrived*/
+};
+
+DEFINE_PER_CPU(struct pktgen_rx, pg_rx_stats);
+DEFINE_PER_CPU(struct pktgen_dev *, pg_devs);
+
 struct pktgen_dev {
     /*
      * Try to keep frequent/infrequent used vars. separated.
@@ -327,6 +338,7 @@ struct pktgen_dev {
     struct pktgen_thread *pg_thread;/* the owner */
     struct list_head list;        /* chaining in the thread's run-queue */
     struct rcu_head     rcu;        /* freed by RCU */
+
 
     int running;        /* if false, the test will stop */
 
@@ -349,6 +361,9 @@ struct pktgen_dev {
     __u64 sofar;        /* How many pkts we've sent so far */
     __u64 tx_bytes;        /* How many bytes we've transmitted */
     __u64 errors;        /* Errors when trying to transmit, */
+
+    __u64 rx_bytes;
+    __u64 rx_packets;
 
     /* runtime counters relating to clone_skb */
 
@@ -430,11 +445,13 @@ struct pktgen_dev {
     __u16 udp_dst_min;    /* inclusive, dest UDP port */
     __u16 udp_dst_max;    /* exclusive, dest UDP port */
 
-    /* DSCP + ECN */
-    __u8 tos;            /* six MSB of (former) IPv4 TOS
-                are for dscp codepoint */
-    __u8 traffic_class;  /* ditto for the (former) Traffic Class in IPv6
-                (see RFC 3260, sec. 4) */
+    union {
+        /* DSCP + ECN */
+        __u8 tos;            /* six MSB of (former) IPv4 TOS
+                    are for dscp codepoint */
+        __u8 traffic_class;  /* ditto for the (former) Traffic Class in IPv6
+                    (see RFC 3260, sec. 4) */
+    };
 
     /* IMIX */
     unsigned int n_imix_entries;
@@ -496,6 +513,9 @@ struct pktgen_dev {
     struct sk_buff *skb;    /* skb we are to transmit next, used for when we
                  * are transmitting the same one multiple times
                  */
+    struct net_device *idev; /* The in-coming device, usually same with
+                              * odev
+                              */
     struct net_device *odev; /* The out-going device.
                   * Note that the device should have it's
                   * pg_info pointer pointing back to this
@@ -828,6 +848,9 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
            (unsigned long long)pkt_dev->sofar,
            (unsigned long long)pkt_dev->errors);
 
+    seq_printf(seq, "     pkts-rx: %llu  bytes: %llu\n",
+               (unsigned long long)pkt_dev->rx_packets,
+               (unsigned long long)pkt_dev->rx_bytes);
     if (pkt_dev->n_imix_entries > 0) {
         int i;
 
@@ -853,17 +876,14 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
 
     if (pkt_dev->cur_tun_vni) {
         seq_printf(seq, "     cur_tun_vni: %d  tun_udp_dst: %d\n",
-                pkt_dev->cur_tun_vni,
-                pkt_dev->tun_udp_dst);
+                pkt_dev->cur_tun_vni, pkt_dev->tun_udp_dst);
         seq_printf(seq, "     cur_tun_saddr: %pI4  cur_tun_daddr: %pI4\n",
-                &pkt_dev->cur_tun_saddr,
-                &pkt_dev->cur_tun_daddr);
+                &pkt_dev->cur_tun_saddr, &pkt_dev->cur_tun_daddr);
     }
 
     if (pkt_dev->flags & F_IPV6) {
         seq_printf(seq, "     cur_saddr: %pI6c  cur_daddr: %pI6c\n",
-                &pkt_dev->cur_in6_saddr,
-                &pkt_dev->cur_in6_daddr);
+                &pkt_dev->cur_in6_saddr, &pkt_dev->cur_in6_daddr);
     } else
         seq_printf(seq, "     cur_saddr: %pI4  cur_daddr: %pI4\n",
                &pkt_dev->cur_saddr, &pkt_dev->cur_daddr);
@@ -2192,6 +2212,20 @@ static ssize_t pktgen_if_write(struct file *file,
         return count;
     }
 
+    if (!strcmp(name, "rx_cmd")) {
+        char f[32];
+        memset(f, 0, 32);
+        len = strn_len(&user_buffer[i], sizeof(f) - 1);
+        if (len < 0) {
+            return len;
+        }
+        if (copy_from_user(f, &user_buffer[i], len))
+            return -EFAULT;
+        i += len;
+        sprintf(pg_result, "OK: rx_cmd=%s", f);
+        return count;
+    }
+
     sprintf(pkt_dev->result, "No such parameter \"%s\"", name);
     return -EINVAL;
 }
@@ -2459,7 +2493,6 @@ static int pktgen_device_event(struct notifier_block *unused,
 }
 
 static struct net_device *pktgen_dev_get_by_name(const struct pktgen_net *pn,
-                         struct pktgen_dev *pkt_dev,
                          const char *ifname)
 {
     char b[IFNAMSIZ+5];
@@ -2478,38 +2511,36 @@ static struct net_device *pktgen_dev_get_by_name(const struct pktgen_net *pn,
 
 
 /* Associate pktgen_dev with a device. */
-
 static int pktgen_setup_dev(const struct pktgen_net *pn,
-                struct pktgen_dev *pkt_dev, const char *ifname)
+                             struct net_device **dev, const char *ifname)
 {
-    struct net_device *odev;
+    struct net_device *idev;
     int err;
 
     /* Clean old setups */
-    if (pkt_dev->odev) {
-
-        dev_put(pkt_dev->odev);
-        pkt_dev->odev = NULL;
+    if (*dev) {
+        dev_put(*dev);
+        *dev = NULL;
     }
 
-    odev = pktgen_dev_get_by_name(pn, pkt_dev, ifname);
-    if (!odev) {
+    idev = pktgen_dev_get_by_name(pn, ifname);
+    if (!idev) {
         pr_err("no such netdevice: \"%s\"\n", ifname);
         return -ENODEV;
     }
 
-    if (odev->type != ARPHRD_ETHER) {
+    if (idev->type != ARPHRD_ETHER) {
         pr_err("not an ethernet device: \"%s\"\n", ifname);
         err = -EINVAL;
-    } else if (!netif_running(odev)) {
+    } else if (!netif_running(idev)) {
         pr_err("device is down: \"%s\"\n", ifname);
         err = -ENETDOWN;
     } else {
-        pkt_dev->odev = odev;
+        *dev = idev;
         return 0;
     }
 
-    dev_put(odev);
+    dev_put(idev);
     return err;
 }
 
@@ -4033,11 +4064,19 @@ static struct sk_buff *fill_tun_packet(struct net_device *odev,
 
 static void pktgen_clear_counters(struct pktgen_dev *pkt_dev)
 {
+    int cpu = 0;
     pkt_dev->seq_num = 1;
     pkt_dev->idle_acc = 0;
     pkt_dev->sofar = 0;
     pkt_dev->tx_bytes = 0;
     pkt_dev->errors = 0;
+
+    pkt_dev->rx_bytes = 0;
+    pkt_dev->rx_packets = 0;
+    for_each_online_cpu(cpu) {
+        per_cpu(pg_rx_stats, cpu).rx_bytes = 0;
+        per_cpu(pg_rx_stats, cpu).rx_packets = 0;
+    }
 }
 
 /* Set up structure for sending pkts, clear counters */
@@ -4636,6 +4675,7 @@ static struct pktgen_dev *pktgen_find_dev(struct pktgen_thread *t,
 static int add_dev_to_thread(struct pktgen_thread *t,
                  struct pktgen_dev *pkt_dev)
 {
+    struct pktgen_dev **p;
     int rv = 0;
 
     /* This function cannot be called concurrently, as its called
@@ -4654,6 +4694,8 @@ static int add_dev_to_thread(struct pktgen_thread *t,
 
     pkt_dev->running = 0;
     pkt_dev->pg_thread = t;
+    p = per_cpu_ptr(&pg_devs, t->cpu);
+    *p = pkt_dev;
     list_add_rcu(&pkt_dev->list, &t->if_list);
 
 out:
@@ -4710,9 +4752,14 @@ static int pktgen_add_device(struct pktgen_thread *t, const char *ifname)
     pkt_dev->pause_time = 0;
     pkt_dev->poll_time = 0;
 
-    err = pktgen_setup_dev(t->net, pkt_dev, ifname);
+    err = pktgen_setup_dev(t->net, &pkt_dev->odev, ifname);
     if (err)
         goto out1;
+
+    err = pktgen_setup_dev(t->net, &pkt_dev->idev, ifname);
+    if (err)
+        goto out1;
+
     if (pkt_dev->odev->priv_flags & IFF_TX_SKB_SHARING)
         pkt_dev->clone_skb = pg_clone_skb_d;
 
@@ -4858,6 +4905,37 @@ static int pktgen_remove_device(struct pktgen_thread *t,
     return 0;
 }
 
+static unsigned int pg_pre_routing_hook_func(void *priv, struct sk_buff *skb,
+                                   const struct nf_hook_state *state)
+{
+    struct pktgen_dev *pkt_dev;
+    struct pktgen_hdr *pgh;
+    struct pktgen_rx *data_cpu;
+    int cpu;
+
+    pgh = (struct pktgen_hdr *)(((char *)(skb_transport_header(skb))) + 8);
+    if(unlikely(pgh->pgh_magic != htonl(PKTGEN_MAGIC))) {
+        return NF_ACCEPT;
+    }
+    cpu = get_cpu();
+    data_cpu = &get_cpu_var(pg_rx_stats);
+    data_cpu->rx_packets++;
+    data_cpu->rx_bytes += skb->len + ETH_HLEN;
+    pkt_dev = get_cpu_var(pg_devs);
+    if (pkt_dev) {
+        pkt_dev->rx_packets ++;
+        pkt_dev->rx_bytes += skb->len + ETH_HLEN;
+    }
+    return NF_DROP;
+}
+
+static struct nf_hook_ops pg_pre_routing = {
+    .hook = pg_pre_routing_hook_func,
+    .hooknum = NF_INET_PRE_ROUTING,
+    .pf = PF_INET,
+    .priority = NF_IP_PRI_FIRST,
+};
+
 static int __net_init pg_net_init(struct net *net)
 {
     struct pktgen_net *pn = net_generic(net, pg_net_id);
@@ -4876,6 +4954,12 @@ static int __net_init pg_net_init(struct net *net)
     if (pe == NULL) {
         pr_err("cannot create %s procfs entry\n", PGCTRL);
         ret = -EINVAL;
+        goto remove;
+    }
+
+    ret = nf_register_net_hook(net, &pg_pre_routing);
+    if (ret) {
+        pr_err("Initialization failed for nf_hook\n");
         goto remove;
     }
 
@@ -4925,6 +5009,7 @@ static void __net_exit pg_net_exit(struct net *net)
         kfree(t);
     }
 
+    nf_unregister_net_hook(net, &pg_pre_routing);
     remove_proc_entry(PGCTRL, pn->proc_dir);
     remove_proc_entry(PG_PROC_DIR, pn->net->proc_net);
 }
