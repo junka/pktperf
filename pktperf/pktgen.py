@@ -23,6 +23,26 @@ def open_write_error(filename, flag, mode="r+"):
         raise IOError("Error writing flag %s" % flag) from exc
 
 
+def cpu_count():
+    try:
+        res = open('/proc/cpuinfo').read().count('processor\t:')
+        if res > 0:
+            return res
+    except IOError:
+        pass
+    # cpuset
+    # cpuset may restrict the number of *available* processors
+    try:
+        m = re.search(r'(?m)^Cpus_allowed:\s*(.*)$',
+                      open('/proc/self/status').read())
+        if m:
+            res = bin(int(m.group(1).replace(',', ''), 16)).count('1')
+            if res > 0:
+                return res
+    except IOError:
+        raise IOError("Error getting cpu count")
+
+
 def modinfo_check() -> str:
     """check module version"""
     n = platform.uname()
@@ -148,12 +168,12 @@ class Pktgen:
         self.imixweight = args.imix
         self.tcp = None
         self.mode = None
+        self.rxq = []
         self.__read_config_file(args.file)
         if self.pgdev is None:
             raise Exception("No interface specified")
         if self.dst_ip_min == "":
             raise Exception("No dst ip specified")
-        self.rxq = []
         self.__init_irq(args.queuemap)
 
     def __read_config_file(self, file):
@@ -247,6 +267,18 @@ class Pktgen:
             self.mode = cfg.get("dummy", "mode")
             if self.mode == "netif_receive" and self.clone is not None:
                 self.clone = None
+        if cfg.has_option("dummy", "rxqlist"):
+            self.rxq = sum(
+                (
+                    (
+                        list(range(*[int(b) + c for c, b in enumerate(a.split("-"))]))
+                        if "-" in a
+                        else [int(a)]
+                    )
+                    for a in cfg.get("dummy", "rxqlist").split(",")
+                ),
+                [],
+            )
 
     def __init_ip_input(self, ipstr):
         """Init pktgen module ip dst"""
@@ -299,8 +331,9 @@ class Pktgen:
                 print("irq affinity not supported")
                 sys.exit()
             self.cpu_list = self.__node_cpu_list(numa)
-            for i in self.irq_list:
-                self.rxq.append(i)
+            if len(self.rxq) == 0:
+                for _ in self.irq_list:
+                    self.rxq.append('0-%d' % (cpu_count() - 1))
 
     @staticmethod
     def pg_ctrl(cmd) -> None:
@@ -469,10 +502,10 @@ class Pktgen:
         for i in self.thread_list:
             if self.queue is True:
                 dev = "%s@%d" % (self.pgdev, self.cpu_list[i])
-                # In a dedicated case, rxq should equal to tx thread
+                # In a dedicated case, rxq num should equal to tx thread
                 irq = self.irq_list[i%len(self.irq_list)]
-                self.rxq[i%len(self.irq_list)] = self.cpu_list[i]
-                self.__config_irq_affinity(irq, self.cpu_list[i])
+                # if irq for a rxq binded to tx cpu, perfermance drop to 1/40
+                self.__config_irq_affinity(irq, self.rxq[i%len(self.irq_list)])
             else:
                 # The device name is extended with @name, using thread id to
                 # make then unique, but any name will do.
