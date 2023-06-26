@@ -560,13 +560,13 @@ class Pktgen:
         res = result_field.search(stats_content)
         pkt = throughput_field.search(stats_content)
         if res is not None and pkt is not None:
-            tpkt = int(res.group(2))
+            tpkts = int(res.group(2))
             tpps = int(pkt.group(1))
             tbps = int(pkt.group(2))
             tbyt = tpkts * int(res.group(3))
             print_cb(
-                "Core%3d send %18d pkts: %18d pps %18d bps %6d bytes"
-                % (core_id, tpkt, tpps, tbps, tbyt)
+                "Core%3d TX %18d pkts: %18d pps %18d bps %6d bytes"
+                % (core_id, tpkts, tpps, tbps, tbyt)
             )
         else:
             other = unresult_field.search(stats_content)
@@ -582,7 +582,7 @@ class Pktgen:
         sofar = sofar_field.search(stats_content)
         tim = time_field.search(stats_content)
         if need_init is True:
-            pkt_sar = PktSar(int(tim.group(1)), self.pkt_size)
+            pkt_sar = PktSar(int(tim.group(1)))
             rx_sar = PktSar(int(tim.group(1)))
             self.stats.append(pkt_sar)
             self.rxstats.append(rx_sar)
@@ -599,8 +599,8 @@ class Pktgen:
         rbyt = 0
         if sofar is not None:
             tpkt = int(sofar.group(1))
-            tbyt = tpkt * pkt_sar._pkt_size
-            pkt_sar.update(tpkt, int(tim.group(2)), 0)
+            tbyt = tpkt * self.pkt_size
+            pkt_sar.update(tpkt, int(tim.group(2)), tbyt)
             tpps, tbps = pkt_sar.get_stats()
             print_cb(
                 "Core%3d TX %18d pkts: %18f pps %18f bps %6d bytes"
