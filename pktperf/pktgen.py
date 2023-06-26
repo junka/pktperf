@@ -128,7 +128,6 @@ class Pktgen:
             self.flows = int(args.flows)
         if args.flowpkts is not None:
             self.flow_len = int(args.flowpkts)
-        self.__init_irq(args.queuemap)
         if args.tos is not None:
             self.tos = int(args.tos)
         self.bps_rate = args.bps
@@ -154,6 +153,8 @@ class Pktgen:
             raise Exception("No interface specified")
         if self.dst_ip_min == "":
             raise Exception("No dst ip specified")
+        self.rxq = []
+        self.__init_irq(args.queuemap)
 
     def __read_config_file(self, file):
         cfg = configparser.ConfigParser()
@@ -298,6 +299,8 @@ class Pktgen:
                 print("irq affinity not supported")
                 sys.exit()
             self.cpu_list = self.__node_cpu_list(numa)
+            for i in self.irq_list:
+                self.rxq.append(i)
 
     @staticmethod
     def pg_ctrl(cmd) -> None:
@@ -352,12 +355,12 @@ class Pktgen:
         """check if os is linux"""
         return os.name == "posix"
 
-    def __config_irq_affinity(self, irq, thread):
+    def __config_irq_affinity(self, irq, cpu):
         """config irq affinity"""
         irq_path = "/proc/irq/%d/smp_affinity_list" % irq
-        open_write_error(irq_path, thread)
+        open_write_error(irq_path, cpu)
         if self.debug is True:
-            print("irq %d is set affinity to %d" % (irq, thread))
+            print("irq %d is set affinity to %d" % (irq, cpu))
 
     def __config_tos(self, dev) -> None:
         """config tos"""
@@ -466,7 +469,9 @@ class Pktgen:
         for i in self.thread_list:
             if self.queue is True:
                 dev = "%s@%d" % (self.pgdev, self.cpu_list[i])
-                irq = self.irq_list[i]
+                # In a dedicated case, rxq should equal to tx thread
+                irq = self.irq_list[i%len(self.irq_list)]
+                self.rxq[i%len(self.irq_list)] = self.cpu_list[i]
                 self.__config_irq_affinity(irq, self.cpu_list[i])
             else:
                 # The device name is extended with @name, using thread id to
@@ -573,10 +578,8 @@ class Pktgen:
         """print result during"""
         stats_content = fp_dev.read()
         sofar_field = re.compile(r"pkts-sofar: (\d+)  errors: (\d+)")
-        rx_field = re.compile(r"pkts-rx: (\d+)  bytes: (\d+)")
         time_field = re.compile(r"started: (\d+)us  stopped: (\d+)us")
         sofar = sofar_field.search(stats_content)
-        rx = rx_field.search(stats_content)
         tim = time_field.search(stats_content)
         if need_init is True:
             pkt_sar = PktSar(int(tim.group(1)), self.pkt_size)
@@ -585,7 +588,7 @@ class Pktgen:
             self.rxstats.append(rx_sar)
         else:
             pkt_sar = self.stats[core_id - self.first_thread]
-            rx_sar = self.rxstats[0]
+            rx_sar = self.rxstats[core_id - self.first_thread]
         tpps = 0
         tbps = 0
         rpps = 0
@@ -603,16 +606,19 @@ class Pktgen:
                 "Core%3d TX %18d pkts: %18f pps %18f bps %6d bytes"
                 % (core_id, tpkt, tpps, tbps, tbyt)
             )
-        if rx is not None:
-            rpkt = int(rx.group(1))
-            rbyt = int(rx.group(2))
-            rx_sar.update(rpkt, int(tim.group(2)), rbyt)
-            rpps, rbps = rx_sar.get_stats()
-            print_cb(
-                "Core%3d RX %18d pkts: %18f pps %18f bps %6d bytes"
-                % (core_id, rpkt, rpps, rbps, rbyt)
-            )
-        
+        if core_id in self.rxq:
+            rx_field = re.compile(r"pkts-rx: (\d+)  bytes: (\d+)")
+            rx = rx_field.search(stats_content)
+            if rx is not None:
+                rpkt = int(rx.group(1))
+                rbyt = int(rx.group(2))
+                rx_sar.update(rpkt, int(tim.group(2)), rbyt)
+                rpps, rbps = rx_sar.get_stats()
+                print_cb(
+                    "Core%3d RX %18d pkts: %18f pps %18f bps %6d bytes"
+                    % (core_id, rpkt, rpps, rbps, rbyt)
+                )
+
         return tpkt, tpps, tbps, tbyt, rpkt, rpps, rbps, rbyt
 
     def result(self, last, print_cb) -> int:
@@ -679,8 +685,43 @@ class Pktgen:
                 ret.append(j)
         return ret
 
+    def __get_driver(self):
+        driverpath = "/sys/class/net/%s/device/driver/module/drivers" % self.pgdev
+        driver_types = os.listdir(driverpath)
+        driver = ''
+        pci = ''
+        for i in driver_types:
+            if i.startswith('pci:') or i.startswith('virtio:'):
+                driver = i.split(':')[1]
+                break
+        if driver != '':
+            pcipath = "/sys/bus/pci/drivers/%s/" % driver
+            pcis = os.listdir(pcipath)
+            for i in pcis:
+                if ':' in i:
+                    if driver == 'virtio_net':
+                        for j in os.listdir("/sys/bus/pci/drivers/virtio-pci/%s/" %  i):
+                            if j.startswith("virtio"):
+                                pcidev = "/sys/bus/pci/drivers/virtio-pci/%s/%s/net" % (i, j)
+                                break
+                    else:
+                        pcidev = "/sys/bus/pci/drivers/%s/%s/net" % (driver, i)
+                    namepath = os.listdir(pcidev)
+                    if namepath[0] == self.pgdev:
+                        pci = i
+                        break
+        return driver, pci
+
     def __get_irqs(self):
         """read out irqs"""
+        # driver, pci = self.__get_driver()
+        # print(driver)
+        # print(pci)
+        # pcipath = "/sys/bus/pci/devices/%s/" % pci
+        # for i in os.listdir(pcipath):
+        """ Once IRQs are allocated by the driver, they are named mlx5_comp<x>@pci:<pci_addr>.
+          The IRQs corresponding to the channels in use are renamed to <interface>-<x>,
+          while the rest maintain their default name."""
         proc_intr = "/proc/interrupts"
         msi_irqs = "/sys/class/net/%s/device/msi_irqs" % self.pgdev
         try:
@@ -693,7 +734,6 @@ class Pktgen:
             r"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+" % (self.pgdev)
         )
         match = devq_irq.finditer(intrs)
-        print(match)
         if len(devq_irq.findall(intrs)) > 0:
             for i in match:
                 irqs.append(int(i.group(1)))
