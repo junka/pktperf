@@ -278,6 +278,7 @@ static char *pkt_flag_names[] = {
 #define M_START_XMIT        0    /* Default normal TX */
 #define M_NETIF_RECEIVE     1    /* Inject packets into stack */
 #define M_QUEUE_XMIT        2    /* Inject packet into qdisc */
+#define M_RX_ONLY           3    /* RX only, no tx packet */
 
 /* tcp modes */
 #define M_SYN_SENT  1
@@ -695,211 +696,215 @@ static int pktgen_if_show(struct seq_file *seq, void *v)
     ktime_t stopped;
     unsigned int i;
     u64 idle;
+    if (pkt_dev->xmit_mode != M_RX_ONLY) {
+        seq_printf(seq,
+            "Params: count %llu  min_pkt_size: %u  max_pkt_size: %u\n",
+            (unsigned long long)pkt_dev->count, pkt_dev->min_pkt_size,
+            pkt_dev->max_pkt_size);
 
-    seq_printf(seq,
-           "Params: count %llu  min_pkt_size: %u  max_pkt_size: %u\n",
-           (unsigned long long)pkt_dev->count, pkt_dev->min_pkt_size,
-           pkt_dev->max_pkt_size);
-
-    if (pkt_dev->n_imix_entries > 0) {
-        seq_puts(seq, "     imix_weights: ");
-        for (i = 0; i < pkt_dev->n_imix_entries; i++) {
-            seq_printf(seq, "%llu,%llu ",
-                   pkt_dev->imix_entries[i].size,
-                   pkt_dev->imix_entries[i].weight);
+        if (pkt_dev->n_imix_entries > 0) {
+            seq_puts(seq, "     imix_weights: ");
+            for (i = 0; i < pkt_dev->n_imix_entries; i++) {
+                seq_printf(seq, "%llu,%llu ",
+                    pkt_dev->imix_entries[i].size,
+                    pkt_dev->imix_entries[i].weight);
+            }
+            seq_puts(seq, "\n");
         }
-        seq_puts(seq, "\n");
-    }
 
-    seq_printf(seq,
-           "     frags: %d  delay: %llu  clone_skb: %d  ifname: %s\n",
-           pkt_dev->nfrags, (unsigned long long) pkt_dev->delay,
-           pkt_dev->clone_skb, pkt_dev->odevname);
-
-    seq_printf(seq, "     flows: %u flowlen: %u\n", pkt_dev->cflows,
-           pkt_dev->lflow);
-
-    if (pkt_dev->pause_time > 0) {
-        seq_printf(seq, "     pause_time: %u poll_time: %u\n", pkt_dev->pause_time,
-                   pkt_dev->poll_time);
-    }
-
-    seq_printf(seq,
-           "     queue_map_min: %u  queue_map_max: %u\n",
-           pkt_dev->queue_map_min,
-           pkt_dev->queue_map_max);
-
-    if (pkt_dev->skb_priority)
-        seq_printf(seq, "     skb_priority: %u\n",
-               pkt_dev->skb_priority);
-
-    if (pkt_dev->tun_vni_min || pkt_dev->tun_udp_dst) {
-        seq_printf(seq, "     tun_udp_dst: 0x%x\n", pkt_dev->tun_udp_dst);
-        seq_printf(seq, "     tun_vni_min: 0x%x tun_vni_max: 0x%x\n",
-                pkt_dev->tun_vni_min, pkt_dev->tun_vni_max);
-        seq_printf(seq, "     tun_dst_min: %s tun_dst_max: %s\n",
-                pkt_dev->tun_dst_min, pkt_dev->tun_dst_max);
-        seq_printf(seq, "     tun_src_min: %s tun_src_max: %s\n",
-                pkt_dev->tun_src_min, pkt_dev->tun_src_max);
-        seq_printf(seq, "     inner_src_mac: %pM inner_dst_mac: %pM\n",
-                pkt_dev->inner_src_mac, pkt_dev->inner_dst_mac);
         seq_printf(seq,
-            "     inner_src_mac_count: %d  inner_dst_mac_count: %d\n",
-            pkt_dev->inner_src_mac_count, pkt_dev->inner_dst_mac_count);
-    }
+            "     frags: %d  delay: %llu  clone_skb: %d  ifname: %s\n",
+            pkt_dev->nfrags, (unsigned long long) pkt_dev->delay,
+            pkt_dev->clone_skb, pkt_dev->odevname);
 
-    if (pkt_dev->flags & F_IPV6) {
+        seq_printf(seq, "     flows: %u flowlen: %u\n", pkt_dev->cflows,
+            pkt_dev->lflow);
+
+        if (pkt_dev->pause_time > 0) {
+            seq_printf(seq, "     pause_time: %u poll_time: %u\n", pkt_dev->pause_time,
+                    pkt_dev->poll_time);
+        }
+
         seq_printf(seq,
-               "     saddr: %pI6c  min_saddr: %pI6c  max_saddr: %pI6c\n"
-               "     daddr: %pI6c  min_daddr: %pI6c  max_daddr: %pI6c\n",
-               &pkt_dev->in6_saddr,
-               &pkt_dev->min_in6_saddr, &pkt_dev->max_in6_saddr,
-               &pkt_dev->in6_daddr,
-               &pkt_dev->min_in6_daddr, &pkt_dev->max_in6_daddr);
-    } else {
+            "     queue_map_min: %u  queue_map_max: %u\n",
+            pkt_dev->queue_map_min,
+            pkt_dev->queue_map_max);
+
+        if (pkt_dev->skb_priority)
+            seq_printf(seq, "     skb_priority: %u\n",
+                pkt_dev->skb_priority);
+
+        if (pkt_dev->tun_vni_min || pkt_dev->tun_udp_dst) {
+            seq_printf(seq, "     tun_udp_dst: 0x%x\n", pkt_dev->tun_udp_dst);
+            seq_printf(seq, "     tun_vni_min: 0x%x tun_vni_max: 0x%x\n",
+                    pkt_dev->tun_vni_min, pkt_dev->tun_vni_max);
+            seq_printf(seq, "     tun_dst_min: %s tun_dst_max: %s\n",
+                    pkt_dev->tun_dst_min, pkt_dev->tun_dst_max);
+            seq_printf(seq, "     tun_src_min: %s tun_src_max: %s\n",
+                    pkt_dev->tun_src_min, pkt_dev->tun_src_max);
+            seq_printf(seq, "     inner_src_mac: %pM inner_dst_mac: %pM\n",
+                    pkt_dev->inner_src_mac, pkt_dev->inner_dst_mac);
+            seq_printf(seq,
+                "     inner_src_mac_count: %d  inner_dst_mac_count: %d\n",
+                pkt_dev->inner_src_mac_count, pkt_dev->inner_dst_mac_count);
+        }
+
+        if (pkt_dev->flags & F_IPV6) {
+            seq_printf(seq,
+                "     saddr: %pI6c  min_saddr: %pI6c  max_saddr: %pI6c\n"
+                "     daddr: %pI6c  min_daddr: %pI6c  max_daddr: %pI6c\n",
+                &pkt_dev->in6_saddr,
+                &pkt_dev->min_in6_saddr, &pkt_dev->max_in6_saddr,
+                &pkt_dev->in6_daddr,
+                &pkt_dev->min_in6_daddr, &pkt_dev->max_in6_daddr);
+        } else {
+            seq_printf(seq,
+                "     dst_min: %s  dst_max: %s\n",
+                pkt_dev->dst_min, pkt_dev->dst_max);
+            seq_printf(seq,
+                "     src_min: %s  src_max: %s\n",
+                pkt_dev->src_min, pkt_dev->src_max);
+        }
+
+        seq_puts(seq, "     src_mac: ");
+
+        seq_printf(seq, "%pM ",
+            is_zero_ether_addr(pkt_dev->src_mac) ?
+                    pkt_dev->odev->dev_addr : pkt_dev->src_mac);
+
+        seq_puts(seq, "dst_mac: ");
+        seq_printf(seq, "%pM\n", pkt_dev->dst_mac);
+
         seq_printf(seq,
-               "     dst_min: %s  dst_max: %s\n",
-               pkt_dev->dst_min, pkt_dev->dst_max);
+            "     udp_src_min: %d  udp_src_max: %d"
+            "  udp_dst_min: %d  udp_dst_max: %d\n",
+            pkt_dev->udp_src_min, pkt_dev->udp_src_max,
+            pkt_dev->udp_dst_min, pkt_dev->udp_dst_max);
+
         seq_printf(seq,
-               "     src_min: %s  src_max: %s\n",
-               pkt_dev->src_min, pkt_dev->src_max);
-    }
+            "     src_mac_count: %d  dst_mac_count: %d\n",
+            pkt_dev->src_mac_count, pkt_dev->dst_mac_count);
 
-    seq_puts(seq, "     src_mac: ");
+        if (pkt_dev->nr_labels) {
+            seq_puts(seq, "     mpls: ");
+            for (i = 0; i < pkt_dev->nr_labels; i++)
+                seq_printf(seq, "%08x%s", ntohl(pkt_dev->labels[i]),
+                    i == pkt_dev->nr_labels-1 ? "\n" : ", ");
+        }
 
-    seq_printf(seq, "%pM ",
-           is_zero_ether_addr(pkt_dev->src_mac) ?
-                 pkt_dev->odev->dev_addr : pkt_dev->src_mac);
+        if (pkt_dev->vlan_id != 0xffff)
+            seq_printf(seq, "     vlan_id: %u  vlan_p: %u  vlan_cfi: %u\n",
+                pkt_dev->vlan_id, pkt_dev->vlan_p,
+                pkt_dev->vlan_cfi);
 
-    seq_puts(seq, "dst_mac: ");
-    seq_printf(seq, "%pM\n", pkt_dev->dst_mac);
+        if (pkt_dev->svlan_id != 0xffff)
+            seq_printf(seq, "     svlan_id: %u  vlan_p: %u  vlan_cfi: %u\n",
+                pkt_dev->svlan_id, pkt_dev->svlan_p,
+                pkt_dev->svlan_cfi);
 
-    seq_printf(seq,
-           "     udp_src_min: %d  udp_src_max: %d"
-           "  udp_dst_min: %d  udp_dst_max: %d\n",
-           pkt_dev->udp_src_min, pkt_dev->udp_src_max,
-           pkt_dev->udp_dst_min, pkt_dev->udp_dst_max);
+        if (pkt_dev->tos)
+            seq_printf(seq, "     tos: 0x%02x\n", pkt_dev->tos);
 
-    seq_printf(seq,
-           "     src_mac_count: %d  dst_mac_count: %d\n",
-           pkt_dev->src_mac_count, pkt_dev->dst_mac_count);
+        if (pkt_dev->traffic_class)
+            seq_printf(seq, "     traffic_class: 0x%02x\n", pkt_dev->traffic_class);
 
-    if (pkt_dev->nr_labels) {
-        seq_puts(seq, "     mpls: ");
-        for (i = 0; i < pkt_dev->nr_labels; i++)
-            seq_printf(seq, "%08x%s", ntohl(pkt_dev->labels[i]),
-                   i == pkt_dev->nr_labels-1 ? "\n" : ", ");
-    }
+        if (pkt_dev->burst > 1)
+            seq_printf(seq, "     burst: %d\n", pkt_dev->burst);
 
-    if (pkt_dev->vlan_id != 0xffff)
-        seq_printf(seq, "     vlan_id: %u  vlan_p: %u  vlan_cfi: %u\n",
-               pkt_dev->vlan_id, pkt_dev->vlan_p,
-               pkt_dev->vlan_cfi);
+        if (pkt_dev->node >= 0)
+            seq_printf(seq, "     node: %d\n", pkt_dev->node);
 
-    if (pkt_dev->svlan_id != 0xffff)
-        seq_printf(seq, "     svlan_id: %u  vlan_p: %u  vlan_cfi: %u\n",
-               pkt_dev->svlan_id, pkt_dev->svlan_p,
-               pkt_dev->svlan_cfi);
+        if (pkt_dev->xmit_mode == M_NETIF_RECEIVE)
+            seq_puts(seq, "     xmit_mode: netif_receive\n");
+        else if (pkt_dev->xmit_mode == M_QUEUE_XMIT)
+            seq_puts(seq, "     xmit_mode: xmit_queue\n");
 
-    if (pkt_dev->tos)
-        seq_printf(seq, "     tos: 0x%02x\n", pkt_dev->tos);
+        seq_puts(seq, "     Flags: ");
 
-    if (pkt_dev->traffic_class)
-        seq_printf(seq, "     traffic_class: 0x%02x\n", pkt_dev->traffic_class);
+        for (i = 0; i < NR_PKT_FLAGS; i++) {
+            if (i == F_FLOW_SEQ)
+                if (!pkt_dev->cflows)
+                    continue;
 
-    if (pkt_dev->burst > 1)
-        seq_printf(seq, "     burst: %d\n", pkt_dev->burst);
-
-    if (pkt_dev->node >= 0)
-        seq_printf(seq, "     node: %d\n", pkt_dev->node);
-
-    if (pkt_dev->xmit_mode == M_NETIF_RECEIVE)
-        seq_puts(seq, "     xmit_mode: netif_receive\n");
-    else if (pkt_dev->xmit_mode == M_QUEUE_XMIT)
-        seq_puts(seq, "     xmit_mode: xmit_queue\n");
-
-    seq_puts(seq, "     Flags: ");
-
-    for (i = 0; i < NR_PKT_FLAGS; i++) {
-        if (i == F_FLOW_SEQ)
-            if (!pkt_dev->cflows)
-                continue;
-
-        if (pkt_dev->flags & (1 << i))
-            seq_printf(seq, "%s  ", pkt_flag_names[i]);
-        else if (i == F_FLOW_SEQ)
-            seq_puts(seq, "FLOW_RND  ");
+            if (pkt_dev->flags & (1 << i))
+                seq_printf(seq, "%s  ", pkt_flag_names[i]);
+            else if (i == F_FLOW_SEQ)
+                seq_puts(seq, "FLOW_RND  ");
 
 #ifdef CONFIG_XFRM
-        if (i == F_IPSEC && pkt_dev->spi)
-            seq_printf(seq, "spi:%u", pkt_dev->spi);
+            if (i == F_IPSEC && pkt_dev->spi)
+                seq_printf(seq, "spi:%u", pkt_dev->spi);
 #endif
+        }
+
+        seq_puts(seq, "\n");
     }
-
-    seq_puts(seq, "\n");
-
     /* not really stopped, more like last-running-at */
     stopped = pkt_dev->running ? ktime_get() : pkt_dev->stopped_at;
     idle = pkt_dev->idle_acc;
     do_div(idle, NSEC_PER_USEC);
 
-    seq_printf(seq,
-           "Current:\n     pkts-sofar: %llu  errors: %llu\n",
-           (unsigned long long)pkt_dev->sofar,
-           (unsigned long long)pkt_dev->errors);
+    seq_printf(seq, "Current:\n");
+    if (pkt_dev->xmit_mode != M_RX_ONLY) {
+        seq_printf(seq, "     pkts-sofar: %llu  errors: %llu\n",
+                (unsigned long long)pkt_dev->sofar,
+                (unsigned long long)pkt_dev->errors);
+    } else {
+        seq_printf(seq, "     pkts-rx: %llu  bytes: %llu\n",
+                (unsigned long long)pkt_dev->rx_packets,
+                (unsigned long long)pkt_dev->rx_bytes);
+    }
 
-    seq_printf(seq, "     pkts-rx: %llu  bytes: %llu\n",
-               (unsigned long long)pkt_dev->rx_packets,
-               (unsigned long long)pkt_dev->rx_bytes);
-    if (pkt_dev->n_imix_entries > 0) {
-        int i;
+    seq_printf(seq, "     started: %lluus  stopped: %lluus idle: %lluus\n",
+               (unsigned long long)ktime_to_us(pkt_dev->started_at),
+               (unsigned long long)ktime_to_us(stopped),
+               (unsigned long long)idle);
 
-        seq_puts(seq, "     imix_size_counts: ");
-        for (i = 0; i < pkt_dev->n_imix_entries; i++) {
-            seq_printf(seq, "%llu,%llu ",
-                   pkt_dev->imix_entries[i].size,
-                   pkt_dev->imix_entries[i].count_so_far);
+    if (pkt_dev->xmit_mode != M_RX_ONLY) {
+        if (pkt_dev->n_imix_entries > 0) {
+            int i;
+
+            seq_puts(seq, "     imix_size_counts: ");
+            for (i = 0; i < pkt_dev->n_imix_entries; i++) {
+                seq_printf(seq, "%llu,%llu ",
+                    pkt_dev->imix_entries[i].size,
+                    pkt_dev->imix_entries[i].count_so_far);
+            }
+            seq_puts(seq, "\n");
         }
-        seq_puts(seq, "\n");
+
+
+        seq_printf(seq,
+            "     seq_num: %d  cur_dst_mac_offset: %d  cur_src_mac_offset: %d\n",
+            pkt_dev->seq_num, pkt_dev->cur_dst_mac_offset,
+            pkt_dev->cur_src_mac_offset);
+
+        if (pkt_dev->cur_tun_vni) {
+            seq_printf(seq, "     cur_tun_vni: %d  tun_udp_dst: %d\n",
+                    pkt_dev->cur_tun_vni, pkt_dev->tun_udp_dst);
+            seq_printf(seq, "     cur_tun_saddr: %pI4  cur_tun_daddr: %pI4\n",
+                    &pkt_dev->cur_tun_saddr, &pkt_dev->cur_tun_daddr);
+        }
+
+        if (pkt_dev->flags & F_IPV6) {
+            seq_printf(seq, "     cur_saddr: %pI6c  cur_daddr: %pI6c\n",
+                    &pkt_dev->cur_in6_saddr, &pkt_dev->cur_in6_daddr);
+        } else
+            seq_printf(seq, "     cur_saddr: %pI4  cur_daddr: %pI4\n",
+                &pkt_dev->cur_saddr, &pkt_dev->cur_daddr);
+
+        seq_printf(seq, "     cur_udp_dst: %d  cur_udp_src: %d\n",
+            pkt_dev->cur_udp_dst, pkt_dev->cur_udp_src);
+
+        seq_printf(seq, "     cur_queue_map: %u\n", pkt_dev->cur_queue_map);
+
+        seq_printf(seq, "     flows: %u\n", pkt_dev->nflows);
+
+        if (pkt_dev->result[0])
+            seq_printf(seq, "Result: %s\n", pkt_dev->result);
+        else
+            seq_puts(seq, "Result: Idle\n");
     }
-
-    seq_printf(seq,
-           "     started: %lluus  stopped: %lluus idle: %lluus\n",
-           (unsigned long long) ktime_to_us(pkt_dev->started_at),
-           (unsigned long long) ktime_to_us(stopped),
-           (unsigned long long) idle);
-
-    seq_printf(seq,
-           "     seq_num: %d  cur_dst_mac_offset: %d  cur_src_mac_offset: %d\n",
-           pkt_dev->seq_num, pkt_dev->cur_dst_mac_offset,
-           pkt_dev->cur_src_mac_offset);
-
-    if (pkt_dev->cur_tun_vni) {
-        seq_printf(seq, "     cur_tun_vni: %d  tun_udp_dst: %d\n",
-                pkt_dev->cur_tun_vni, pkt_dev->tun_udp_dst);
-        seq_printf(seq, "     cur_tun_saddr: %pI4  cur_tun_daddr: %pI4\n",
-                &pkt_dev->cur_tun_saddr, &pkt_dev->cur_tun_daddr);
-    }
-
-    if (pkt_dev->flags & F_IPV6) {
-        seq_printf(seq, "     cur_saddr: %pI6c  cur_daddr: %pI6c\n",
-                &pkt_dev->cur_in6_saddr, &pkt_dev->cur_in6_daddr);
-    } else
-        seq_printf(seq, "     cur_saddr: %pI4  cur_daddr: %pI4\n",
-               &pkt_dev->cur_saddr, &pkt_dev->cur_daddr);
-
-    seq_printf(seq, "     cur_udp_dst: %d  cur_udp_src: %d\n",
-           pkt_dev->cur_udp_dst, pkt_dev->cur_udp_src);
-
-    seq_printf(seq, "     cur_queue_map: %u\n", pkt_dev->cur_queue_map);
-
-    seq_printf(seq, "     flows: %u\n", pkt_dev->nflows);
-
-    if (pkt_dev->result[0])
-        seq_printf(seq, "Result: %s\n", pkt_dev->result);
-    else
-        seq_puts(seq, "Result: Idle\n");
-
     return 0;
 }
 
@@ -1524,6 +1529,10 @@ static ssize_t pktgen_if_write(struct file *file,
         } else if (strcmp(f, "queue_xmit") == 0) {
             pkt_dev->xmit_mode = M_QUEUE_XMIT;
             pkt_dev->last_ok = 1;
+        } else if (strcmp(f, "rx_only") == 0) {
+            pkt_dev->xmit_mode = M_RX_ONLY;
+            pkt_dev->last_ok = 1;
+            pkt_dev->clone_skb = 0;
         } else {
             sprintf(pg_result,
                 "xmit_mode -:%s:- unknown\nAvailable modes: %s",
@@ -4453,7 +4462,11 @@ static void pktgen_xmit(struct pktgen_dev *pkt_dev)
         }
     }
 
-    if (pkt_dev->xmit_mode == M_NETIF_RECEIVE) {
+    if (pkt_dev->xmit_mode == M_RX_ONLY) {
+        local_bh_disable();
+        cpu_relax();
+        goto out;
+    } else if (pkt_dev->xmit_mode == M_NETIF_RECEIVE) {
         skb = pkt_dev->skb;
         skb->protocol = eth_type_trans(skb, skb->dev);
         refcount_add(burst, &skb->users);

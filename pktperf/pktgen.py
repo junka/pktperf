@@ -135,8 +135,7 @@ class Pktgen:
             self.burst = int(args.burst)
         if args.threads is not None:
             self.threads = int(args.threads)
-        self.stats = []
-        self.rxstats = []
+        self.stats = {}
         if args.firstthread is not None:
             self.first_thread = int(args.firstthread)
         self.thread_list = list(
@@ -324,16 +323,16 @@ class Pktgen:
     def __init_irq(self, queuemap) -> None:
         """init irq affinity if queue mapping enabled"""
         self.queue = queuemap
+        self.irq_list = self.__get_irqs()
         if queuemap is True:
             numa = self.__get_dev_numa()
-            self.irq_list = self.__get_irqs()
             if len(self.irq_list) == 0:
                 print("irq affinity not supported")
                 sys.exit()
             self.cpu_list = self.__node_cpu_list(numa)
             if len(self.rxq) == 0:
                 for _ in self.irq_list:
-                    self.rxq.append('0-%d' % (cpu_count() - 1))
+                    self.rxq.append(cpu_count())
 
     @staticmethod
     def pg_ctrl(cmd) -> None:
@@ -365,9 +364,9 @@ class Pktgen:
         pgdev = "/proc/net/pktgen/%s" % dev
         open_write_error(pgdev, flag)
 
-    def __pg_get_devpath(self, index) -> str:
+    def __pg_get_devpath(self, index, role) -> str:
         """get dev path for thread index"""
-        if self.queue is True:
+        if self.queue is True and role == 'tx':
             dev = "%s@%d" % (self.pgdev, self.cpu_list[index])
         else:
             dev = "%s@%d" % (self.pgdev, index)
@@ -391,6 +390,8 @@ class Pktgen:
     def __config_irq_affinity(self, irq, cpu):
         """config irq affinity"""
         irq_path = "/proc/irq/%d/smp_affinity_list" % irq
+        if cpu == cpu_count():
+            cpu = "0-%d" % (cpu_count()-1)
         open_write_error(irq_path, cpu)
         if self.debug is True:
             print("irq %d is set affinity to %d" % (irq, cpu))
@@ -498,19 +499,29 @@ class Pktgen:
         # General cleanup everything since last run
         self.reset()
 
+        # In a dedicated case, rxq num should equal to tx thread
+        # if irq for a rxq binded to tx cpu, perfermance drop to 1/40
+        for i, irq in enumerate(self.irq_list):
+            q = self.rxq[i%len(self.rxq)]
+            self.__config_irq_affinity(irq, q)
+            if q == cpu_count():
+                continue
+            dev = "%s@%d" % (self.pgdev, q)
+            if self.append is False:
+                self.pg_thread(q, "rem_device_all")
+            self.pg_thread(q, "add_device %s" % dev)
+            self.pg_set(dev, "xmit_mode rx_only")
+            self.pg_set(dev, "count 0")
+
         # Threads are specified with parameter -t value in $THREADS
         for i in self.thread_list:
             if self.queue is True:
                 dev = "%s@%d" % (self.pgdev, self.cpu_list[i])
-                # In a dedicated case, rxq num should equal to tx thread
-                irq = self.irq_list[i%len(self.irq_list)]
-                # if irq for a rxq binded to tx cpu, perfermance drop to 1/40
-                self.__config_irq_affinity(irq, self.rxq[i%len(self.irq_list)])
             else:
                 # The device name is extended with @name, using thread id to
-                # make then unique, but any name will do.
+                # make them unique, but any name will do.
                 dev = "%s@%d" % (self.pgdev, i)
-
+            # print(dev)
             # Add remove all other devices and add_device $dev to thread
             if self.append is False:
                 self.pg_thread(i, "rem_device_all")
@@ -578,10 +589,10 @@ class Pktgen:
     @staticmethod
     def result_last(core_id, fp_dev, print_cb):
         """print last result"""
-        tpkts = 0
-        tpps = 0
-        tbps = 0
-        tbps = 0
+        pkts = 0
+        pps = 0
+        bps = 0
+        bps = 0
         stats_content = fp_dev.read()
         result_field = re.compile(
             r"Result: (\w+): \d+\([\w\+]+\) \w+, (\d+) \((\d+)byte,\d+frags\)"
@@ -593,19 +604,19 @@ class Pktgen:
         res = result_field.search(stats_content)
         pkt = throughput_field.search(stats_content)
         if res is not None and pkt is not None:
-            tpkts = int(res.group(2))
-            tpps = int(pkt.group(1))
-            tbps = int(pkt.group(2))
-            tbyt = tpkts * int(res.group(3))
+            pkts = int(res.group(2))
+            pps = int(pkt.group(1))
+            bps = int(pkt.group(2))
+            byt = pkts * int(res.group(3))
             print_cb(
                 "Core%3d TX %18d pkts: %18d pps %18d bps %6d bytes"
-                % (core_id, tpkts, tpps, tbps, tbyt)
+                % (core_id, pkts, pps, bps, byt)
             )
         else:
             other = unresult_field.search(stats_content)
             if other is not None:
                 print_cb("Core%3d %s" % (core_id, other.group(1)))
-        return tpkts, tpps, tbps, tbps, 0, 0, 0, 0
+        return pkts, pps, bps, bps
 
     def result_transient(self, need_init, core_id, fp_dev, print_cb):
         """print result during"""
@@ -614,45 +625,35 @@ class Pktgen:
         time_field = re.compile(r"started: (\d+)us  stopped: (\d+)us")
         sofar = sofar_field.search(stats_content)
         tim = time_field.search(stats_content)
+        if sofar is not None:
+            direction = 'TX'
+        else:
+            direction = 'RX'
+            sofar_field = re.compile(r"pkts-rx: (\d+)  bytes: (\d+)")
+            sofar = sofar_field.search(stats_content)
         if need_init is True:
             pkt_sar = PktSar(int(tim.group(1)))
-            rx_sar = PktSar(int(tim.group(1)))
-            self.stats.append(pkt_sar)
-            self.rxstats.append(rx_sar)
+            self.stats[core_id] = pkt_sar
         else:
-            pkt_sar = self.stats[core_id - self.first_thread]
-            rx_sar = self.rxstats[core_id - self.first_thread]
-        tpps = 0
-        tbps = 0
-        rpps = 0
-        rbps = 0
-        tbyt = 0
-        tpkt = 0
-        rpkt = 0
-        rbyt = 0
-        if sofar is not None:
-            tpkt = int(sofar.group(1))
-            tbyt = tpkt * self.pkt_size
-            pkt_sar.update(tpkt, int(tim.group(2)), tbyt)
-            tpps, tbps = pkt_sar.get_stats()
-            print_cb(
-                "Core%3d TX %18d pkts: %18f pps %18f bps %6d bytes"
-                % (core_id, tpkt, tpps, tbps, tbyt)
-            )
-        if core_id in self.rxq:
-            rx_field = re.compile(r"pkts-rx: (\d+)  bytes: (\d+)")
-            rx = rx_field.search(stats_content)
-            if rx is not None:
-                rpkt = int(rx.group(1))
-                rbyt = int(rx.group(2))
-                rx_sar.update(rpkt, int(tim.group(2)), rbyt)
-                rpps, rbps = rx_sar.get_stats()
-                print_cb(
-                    "Core%3d RX %18d pkts: %18f pps %18f bps %6d bytes"
-                    % (core_id, rpkt, rpps, rbps, rbyt)
-                )
+            pkt_sar = self.stats[core_id]
+        pps = 0
+        bps = 0
+        byt = 0
+        pkt = 0
 
-        return tpkt, tpps, tbps, tbyt, rpkt, rpps, rbps, rbyt
+        pkt = int(sofar.group(1))
+        if direction == 'TX':
+            byt = pkt * self.pkt_size
+        else:
+            byt = int(sofar.group(2))
+        pkt_sar.update(pkt, int(tim.group(2)), byt)
+        pps, bps = pkt_sar.get_stats()
+        print_cb(
+            "Core%3d %s %18d pkts: %18f pps %18f bps %6d bytes"
+            % (core_id, direction, pkt, pps, bps, byt)
+        )
+
+        return pkt, pps, bps, byt
 
     def result(self, last, print_cb) -> int:
         """Print results"""
@@ -666,13 +667,13 @@ class Pktgen:
         if len(self.stats) == 0:
             need_init = True
         for i in self.thread_list:
-            with open(self.__pg_get_devpath(i), "r") as fp_dev:
+            with open(self.__pg_get_devpath(i, 'tx'), "r") as fp_dev:
                 if last is False:
-                    sg_pkts, sg_pps, sg_bps, sg_bytes, rg_pkts, rg_pps, rg_bps, rg_bytes = self.result_transient(
+                    sg_pkts, sg_pps, sg_bps, sg_bytes = self.result_transient(
                         need_init, i, fp_dev, print_cb
                     )
                 else:
-                    sg_pkts, sg_pps, sg_bps, sg_bytes, rg_pkts, rg_pps, rg_bps, rg_bytes = self.result_last(
+                    sg_pkts, sg_pps, sg_bps, sg_bytes  = self.result_last(
                         i, fp_dev, print_cb
                     )
                 total_pkts += sg_pkts
@@ -683,6 +684,28 @@ class Pktgen:
             "Total   TX %18d pkts: %18d pps %18d bps %6d bytes"
             % (total_pkts, total_pps, total_bps, total_bytes)
         )
+
+        total_pkts = 0
+        total_pps = 0
+        total_bps = 0
+        total_bytes = 0
+        rx_cnt = 0
+        for i, _ in enumerate(self.irq_list):
+            q = self.rxq[i % len(self.rxq)]
+            if q == cpu_count():
+                continue
+            rx_cnt += 1
+            with open(self.__pg_get_devpath(q, 'rx'), "r") as fp_dev:
+                sg_pkts, sg_pps, sg_bps, sg_bytes = self.result_transient(
+                    need_init, q, fp_dev, print_cb
+                )
+                total_pkts += sg_pkts
+                total_pps += sg_pps
+                total_bps += sg_bps
+                total_bytes += sg_bytes
+        if rx_cnt > 0:
+            print_cb("Total   RX %18d pkts: %18d pps %18d bps %6d bytes"
+                    % (total_pkts, total_pps, total_bps, total_bytes))
         if last is False and self.num > 0 and total_pkts >= self.num:
             return 1
         return 0
