@@ -17,15 +17,15 @@ def open_write_error(filename, flag, mode="r+"):
     """open and write a flag to file"""
     try:
         with open(filename, mode, encoding="utf-8") as fp_dev:
-            fp_dev.write("%s\n" % flag)
+            fp_dev.write(f"{flag}\n")
     except IOError as exc:
-        print("Error: Cannot open %s" % (filename))
-        raise IOError("Error writing flag %s" % flag) from exc
+        print(f"Error: Cannot open {filename}")
+        raise IOError(f"Error writing flag {flag}") from exc
 
 
 def cpu_count():
     try:
-        res = open('/proc/cpuinfo').read().count('processor\t:')
+        res = open('/proc/cpuinfo', encoding='utf-8').read().count('processor\t:')
         if res > 0:
             return res
     except IOError:
@@ -34,19 +34,19 @@ def cpu_count():
     # cpuset may restrict the number of *available* processors
     try:
         m = re.search(r'(?m)^Cpus_allowed:\s*(.*)$',
-                      open('/proc/self/status').read())
+                      open('/proc/self/status', encoding='utf-8').read())
         if m:
             res = bin(int(m.group(1).replace(',', ''), 16)).count('1')
             if res > 0:
                 return res
-    except IOError:
-        raise IOError("Error getting cpu count")
+    except IOError as exc:
+        raise IOError("Error getting cpu count") from exc
 
 
 def modinfo_check() -> str:
     """check module version"""
     n = platform.uname()
-    depfile = "/lib/modules/%s/modules.dep" % n.release
+    depfile = f"/lib/modules/{n.release}/modules.dep"
     try:
         with open(depfile, "r", encoding="utf-8") as fp_dep:
             fp_dep.readlines()
@@ -339,12 +339,13 @@ class Pktgen:
         """pg_ctrl control "pgctrl" (/proc/net/pktgen/pgctrl)"""
         pgctrl = "/proc/net/pktgen/pgctrl"
         if cmd not in ["start", "stop", "reset"]:
-            print("pgctrl do not support cmd %s" % cmd)
+            print(f"pgctrl do not support cmd {cmd}")
             sys.exit(1)
         open_write_error(pgctrl, cmd)
 
     @staticmethod
     def pg_version() -> str:
+        """read pktgen version from pgctrl"""
         pgctrl = "/proc/net/pktgen/pgctrl"
         try:
             with open(pgctrl, "r", encoding="utf-8") as f_ctl:
@@ -361,24 +362,24 @@ class Pktgen:
         if dev.find(self.pgdev) < 0:
             print("device not match")
             sys.exit(1)
-        pgdev = "/proc/net/pktgen/%s" % dev
+        pgdev = f"/proc/net/pktgen/{dev}"
         open_write_error(pgdev, flag)
 
     def __pg_get_devpath(self, index, role) -> str:
         """get dev path for thread index"""
         if self.queue is True and role == 'tx':
-            dev = "%s@%d" % (self.pgdev, self.cpu_list[index])
+            dev = f"{self.pgdev}@{self.cpu_list[index]}"
         else:
-            dev = "%s@%d" % (self.pgdev, index)
-        devpath = "/proc/net/pktgen/%s" % dev
+            dev = f"{self.pgdev}@{index}"
+        devpath = f"/proc/net/pktgen/{dev}"
         return devpath
 
     @staticmethod
     def pg_thread(thread, cmd) -> None:
         """pg_thread() control the kernel threads and binding to devices"""
-        pgthread = "/proc/net/pktgen/kpktgend_%d" % thread
+        pgthread = f"/proc/net/pktgen/kpktgend_{thread}"
         if cmd != "rem_device_all" and cmd.find("add_device") != 0:
-            print("pg_thread do not support cmd %s" % cmd)
+            print(f"pg_thread do not support cmd {cmd}")
             sys.exit(1)
         open_write_error(pgthread, cmd, "w")
 
@@ -389,75 +390,75 @@ class Pktgen:
 
     def __config_irq_affinity(self, irq, cpu):
         """config irq affinity"""
-        irq_path = "/proc/irq/%d/smp_affinity_list" % irq
+        irq_path = f"/proc/irq/{irq}/smp_affinity_list"
         if cpu == cpu_count():
-            cpu = "0-%d" % (cpu_count()-1)
+            cpu = f"0-{cpu_count()-1}"
         open_write_error(irq_path, cpu)
         if self.debug is True:
-            print("irq %d is set affinity to %d" % (irq, cpu))
+            print(f"irq {irq} is set affinity to {cpu}")
 
     def __config_tos(self, dev) -> None:
         """config tos"""
         if self.tos is not None and self.tos != 0:
             if self.ipv6 is True:
-                self.pg_set(dev, "traffic_class %0x" % self.tos)
+                self.pg_set(dev, f"traffic_class {self.tos:0x}")
             else:
-                self.pg_set(dev, "tos %0x" % self.tos)
+                self.pg_set(dev, f"tos {self.tos:0x}")
 
     def __config_vlan(self, dev) -> None:
         """config vlan related parameter"""
         if self.vlan is not None and 0 <= int(self.vlan) < 4096:
-            self.pg_set(dev, "vlan_id %d" % int(self.vlan))
+            self.pg_set(dev, f"vlan_id {self.vlan}")
         if self.svlan is not None and 0 <= int(self.svlan) < 4096:
-            self.pg_set(dev, "svlan_id %d" % int(self.svlan))
+            self.pg_set(dev, f"svlan_id {self.svlan}")
 
     def __config_udp_portrange(self, dev) -> None:
         """config udp port range"""
         if self.dst_port_max is not None:
             # Single destination port or random port range
             self.pg_set(dev, "flag UDPDST_RND")
-            self.pg_set(dev, "udp_dst_min %d" % (self.dst_port_min))
-            self.pg_set(dev, "udp_dst_max %d" % (self.dst_port_max))
+            self.pg_set(dev, f"udp_dst_min {self.dst_port_min}")
+            self.pg_set(dev, f"udp_dst_max {self.dst_port_max}")
 
         if self.csum is True:
             self.pg_set(dev, "flag UDPCSUM")
 
         # Setup random UDP port src range
         self.pg_set(dev, "flag UDPSRC_RND")
-        self.pg_set(dev, "udp_src_min %d" % (self.src_port_min))
-        self.pg_set(dev, "udp_src_max %d" % (self.src_port_max))
+        self.pg_set(dev, f"udp_src_min {self.src_port_min}")
+        self.pg_set(dev, f"udp_src_max {self.src_port_max}")
 
     def __config_ip_dst(self, dev) -> None:
         # Destination
         if self.dst_ip_min.version == 6:
-            self.pg_set(dev, "dst_min6 %s" % (self.dst_ip_min))
-            self.pg_set(dev, "dst_max6 %s" % (self.dst_ip_max))
+            self.pg_set(dev, f"dst_min6 {self.dst_ip_min}")
+            self.pg_set(dev, f"dst_max6 {self.dst_ip_max}")
         else:
-            self.pg_set(dev, "dst_min %s" % (self.dst_ip_min))
-            self.pg_set(dev, "dst_max %s" % (self.dst_ip_max))
+            self.pg_set(dev, f"dst_min {self.dst_ip_min}")
+            self.pg_set(dev, f"dst_max {self.dst_ip_max}")
 
     def __config_ip_src(self, dev) -> None:
         if self.src_ip_min == "":
             return None
         if self.src_ip_min.version == 6:
-            self.pg_set(dev, "src_min6 %s" % (self.src_ip_min))
-            self.pg_set(dev, "src_max6 %s" % (self.src_ip_max))
+            self.pg_set(dev, f"src_min6 {self.src_ip_min}")
+            self.pg_set(dev, f"src_max6 {self.src_ip_max}")
         else:
-            self.pg_set(dev, "src_min %s" % (self.src_ip_min))
-            self.pg_set(dev, "src_max %s" % (self.src_ip_max))
+            self.pg_set(dev, f"src_min {self.src_ip_min}")
+            self.pg_set(dev, f"src_max {self.src_ip_max}")
 
     def __config_imix(self, dev) -> None:
         if self.imixweight is not None:
             weight = self.imixweight.replace(",", " ").replace(":", ",")
-            self.pg_set(dev, "imix_weights %s" % weight)
+            self.pg_set(dev, f"imix_weights {weight}")
 
     def __config_burst_mode(self, dev) -> None:
         if self.microburst is not None:
-            self.pg_set(dev, "micro_burst %s" % self.microburst)
+            self.pg_set(dev, f"micro_burst {self.microburst}")
             self.burst = 0
         # hw burst
         if self.burst is not None and self.burst > 0:
-            self.pg_set(dev, "burst %d" % self.burst)
+            self.pg_set(dev, f"burst {self.burst}")
 
     def __config_tun_meta(self, dev) -> None:
         if self.tun_vni is not None:
@@ -467,32 +468,32 @@ class Pktgen:
             elif len(vni) == 1:
                 vni_max = vni[0]
             vni_min = vni[0]
-            self.pg_set(dev, "tun_meta_min %06x" % int(vni_min))
-            self.pg_set(dev, "tun_meta_max %06x" % int(vni_max))
-            self.pg_set(dev, "tun_udp_dst %d" % int(self.tun_udpport))
+            self.pg_set(dev, f"tun_meta_min {int(vni_min):06x}")
+            self.pg_set(dev, f"tun_meta_max {int(vni_max):06x}")
+            self.pg_set(dev, f"tun_udp_dst {self.tun_udpport}")
             if self.tun_src_min != "":
-                self.pg_set(dev, "tun_src_min %s" % self.tun_src_min)
+                self.pg_set(dev, f"tun_src_min {self.tun_src_min}")
             if self.tun_src_max != "":
-                self.pg_set(dev, "tun_src_max %s" % self.tun_src_max)
+                self.pg_set(dev, f"tun_src_max {self.tun_src_max}")
             if self.tun_dst_min != "":
-                self.pg_set(dev, "tun_dst_min %s" % self.tun_dst_min)
+                self.pg_set(dev, f"tun_dst_min {self.tun_dst_min}")
             if self.tun_dst_max != "":
-                self.pg_set(dev, "tun_dst_max %s" % self.tun_dst_max)
+                self.pg_set(dev, f"tun_dst_max {self.tun_dst_max}")
             if self.inner_smac is not None:
-                self.pg_set(dev, "inner_src_mac %s" % self.inner_smac)
+                self.pg_set(dev, f"inner_src_mac {self.inner_smac}")
             if self.inner_dmac is not None:
-                self.pg_set(dev, "inner_dst_mac %s" % self.inner_dmac)
+                self.pg_set(dev, f"inner_dst_mac {self.inner_dmac}")
             if self.inner_dmac_count > 0:
-                self.pg_set(dev, "inner_dmac_num %d" % self.inner_dmac_count)
+                self.pg_set(dev, f"inner_dmac_num {self.inner_dmac_count}")
             if self.inner_smac_count > 0:
-                self.pg_set(dev, "inner_smac_num %d" % self.inner_smac_count)
+                self.pg_set(dev, f"inner_smac_num {self.inner_smac_count}")
 
     def __config_ratelimit(self, dev) -> None:
         # rate limit
         if self.bps_rate is not None:
-            self.pg_set(dev, "rate %s" % (self.bps_rate))
+            self.pg_set(dev, f"rate {self.bps_rate}")
         if self.pps_rate is not None:
-            self.pg_set(dev, "ratep %s" % (self.pps_rate))
+            self.pg_set(dev, f"ratep {self.pps_rate}")
 
     def config_queue(self) -> None:
         """configure queues for pktgen"""
@@ -502,51 +503,51 @@ class Pktgen:
         # In a dedicated case, rxq num should equal to tx thread
         # if irq for a rxq binded to tx cpu, perfermance drop to 1/40
         for i, irq in enumerate(self.irq_list):
-            q = self.rxq[i%len(self.rxq)]
+            q = self.rxq[i % len(self.rxq)]
             self.__config_irq_affinity(irq, q)
             if q == cpu_count():
                 continue
-            dev = "%s@%d" % (self.pgdev, q)
+            dev = f"{self.pgdev}@{q}"
             if self.append is False:
                 self.pg_thread(q, "rem_device_all")
-            self.pg_thread(q, "add_device %s" % dev)
+            self.pg_thread(q, f"add_device {dev}")
             self.pg_set(dev, "xmit_mode rx_only")
             self.pg_set(dev, "count 0")
 
         # Threads are specified with parameter -t value in $THREADS
         for i in self.thread_list:
             if self.queue is True:
-                dev = "%s@%d" % (self.pgdev, self.cpu_list[i])
+                dev = f"{self.pgdev}@{self.cpu_list[i]}"
             else:
                 # The device name is extended with @name, using thread id to
                 # make them unique, but any name will do.
-                dev = "%s@%d" % (self.pgdev, i)
+                dev = f"{self.pgdev}@{i}"
             # print(dev)
             # Add remove all other devices and add_device $dev to thread
             if self.append is False:
                 self.pg_thread(i, "rem_device_all")
-            self.pg_thread(i, "add_device %s" % dev)
+            self.pg_thread(i, f"add_device {dev}")
 
             # select queue and bind the queue and $dev in 1:1 relationship
             if self.queue is True:
                 qid = i - self.first_thread
                 if self.debug is True:
-                    print("queue number is %d" % (qid))
-                self.pg_set(dev, "queue_map_min %d" % qid)
-                self.pg_set(dev, "queue_map_max %d" % qid)
+                    print(f"queue number is {qid}")
+                self.pg_set(dev, f"queue_map_min {qid}")
+                self.pg_set(dev, f"queue_map_max {qid}")
 
             # Notice config queue to map to cpu (mirrors smp_processor_id())
             # It is beneficial to map IRQ /proc/irq/*/smp_affinity 1:1 to CPU
             self.pg_set(dev, "flag QUEUE_MAP_CPU")
 
             # Base config of dev
-            self.pg_set(dev, "count %d" % math.ceil(self.num / self.threads))
+            self.pg_set(dev, f"count {math.ceil(self.num / self.threads)}")
             if self.clone is not None:
-                self.pg_set(dev, "clone_skb %d" % self.clone)
-            self.pg_set(dev, "pkt_size %d" % self.pkt_size)
+                self.pg_set(dev, f"clone_skb {self.clone}")
+            self.pg_set(dev, f"pkt_size {self.pkt_size}")
             if self.frags is not None and self.frags != 1:
-                self.pg_set(dev, "frags %d" % self.frags)
-            self.pg_set(dev, "delay %d" % self.tx_delay)
+                self.pg_set(dev, f"frags {self.frags}")
+            self.pg_set(dev, f"delay {self.tx_delay}")
 
             self.__config_tos(dev)
 
@@ -554,7 +555,7 @@ class Pktgen:
             self.pg_set(dev, "flag NO_TIMESTAMP")
 
             self.__config_tun_meta(dev)
-            self.pg_set(dev, "dst_mac %s" % (self.dst_mac))
+            self.pg_set(dev, f"dst_mac {self.dst_mac}")
             self.__config_ip_dst(dev)
             self.__config_ip_src(dev)
             self.__config_udp_portrange(dev)
@@ -565,12 +566,12 @@ class Pktgen:
             self.__config_imix(dev)
             self.__config_burst_mode(dev)
             node = self.__get_dev_numa()
-            self.pg_set(dev, "node %d" % node)
+            self.pg_set(dev, f"node {node}")
             if self.tcp is not None:
-                self.pg_set(dev, "tcp_syn %s" % self.tcp)
+                self.pg_set(dev, f"tcp_syn {self.tcp}")
                 self.pg_set(dev, "flag UDPCSUM")
             if self.mode is not None:
-                self.pg_set(dev, "xmit_mode %s" % self.mode)
+                self.pg_set(dev, f"xmit_mode {self.mode}")
 
     def reset(self) -> None:
         """reset pktgen"""
@@ -609,13 +610,12 @@ class Pktgen:
             bps = int(pkt.group(2))
             byt = pkts * int(res.group(3))
             print_cb(
-                "Core%3d TX %18d pkts: %18d pps %18d bps %6d bytes"
-                % (core_id, pkts, pps, bps, byt)
+                f"Core{core_id:3d} TX {pkts:18d} pkts: {pps:18d} pps {bps:18d} bps {byt:6d} bytes"
             )
         else:
             other = unresult_field.search(stats_content)
             if other is not None:
-                print_cb("Core%3d %s" % (core_id, other.group(1)))
+                print_cb(f"Core{core_id:3d} {other.group(1)}")
         return pkts, pps, bps, bps
 
     def result_transient(self, need_init, core_id, fp_dev, print_cb):
@@ -649,8 +649,7 @@ class Pktgen:
         pkt_sar.update(pkt, int(tim.group(2)), byt)
         pps, bps = pkt_sar.get_stats()
         print_cb(
-            "Core%3d %s %18d pkts: %18f pps %18f bps %6d bytes"
-            % (core_id, direction, pkt, pps, bps, byt)
+            f"Core{core_id:3d} {direction} {pkt:18d} pkts: {pps:18f} pps {bps:18f} bps {byt:6d} bytes"
         )
 
         return pkt, pps, bps, byt
@@ -658,7 +657,7 @@ class Pktgen:
     def result(self, last, print_cb) -> int:
         """Print results"""
         if last is True:
-            print("%d cores enabled" % self.threads)
+            print(f"{self.threads} cores enabled")
         need_init = False
         total_pkts = 0
         total_pps = 0
@@ -673,7 +672,7 @@ class Pktgen:
                         need_init, i, fp_dev, print_cb
                     )
                 else:
-                    sg_pkts, sg_pps, sg_bps, sg_bytes  = self.result_last(
+                    sg_pkts, sg_pps, sg_bps, sg_bytes = self.result_last(
                         i, fp_dev, print_cb
                     )
                 total_pkts += sg_pkts
@@ -681,8 +680,7 @@ class Pktgen:
                 total_bps += sg_bps
                 total_bytes += sg_bytes
         print_cb(
-            "Total   TX %18d pkts: %18d pps %18d bps %6d bytes"
-            % (total_pkts, total_pps, total_bps, total_bytes)
+            f"Total   TX {total_pkts:18d} pkts: {total_pps:18d} pps {total_bps:18d} bps {total_bytes:6d} bytes"
         )
 
         total_pkts = 0
@@ -695,7 +693,7 @@ class Pktgen:
             if q == cpu_count():
                 continue
             rx_cnt += 1
-            with open(self.__pg_get_devpath(q, 'rx'), "r") as fp_dev:
+            with open(self.__pg_get_devpath(q, 'rx'), "r", encoding="utf-8") as fp_dev:
                 sg_pkts, sg_pps, sg_bps, sg_bytes = self.result_transient(
                     need_init, q, fp_dev, print_cb
                 )
@@ -704,20 +702,19 @@ class Pktgen:
                 total_bps += sg_bps
                 total_bytes += sg_bytes
         if rx_cnt > 0:
-            print_cb("Total   RX %18d pkts: %18d pps %18d bps %6d bytes"
-                    % (total_pkts, total_pps, total_bps, total_bytes))
+            print_cb(f"Total   RX {total_pkts:18d} pkts: {total_pps:18d} pps {total_bps:18d} bps {total_bytes:6d} bytes")
         if last is False and self.num > 0 and total_pkts >= self.num:
             return 1
         return 0
 
     def __get_dev_numa(self) -> int:
         """__get_dev_numa returns the numa node of the device"""
-        numa_path = "/sys/class/net/%s/device/numa_node" % self.pgdev
+        numa_path = f"/sys/class/net/{self.pgdev}/device/numa_node"
         try:
-            with open(numa_path, "r") as fp_numa:
+            with open(numa_path, mode="r", encoding="utf-8") as fp_numa:
                 node = fp_numa.read().rstrip("\n")
         except IOError:
-            print("Error: Cannot open %s" % (numa_path))
+            print(f"Error: Cannot open {numa_path}")
             return 0
         if node == "-1":
             return 0
@@ -726,12 +723,12 @@ class Pktgen:
     @staticmethod
     def __node_cpu_list(node) -> list:
         """__node_cpu_list returns the cpu list of the node"""
-        cpu_list = "/sys/devices/system/node/node%d/cpulist" % node
+        cpu_list = f"/sys/devices/system/node/node{node}/cpulist"
         try:
             with open(cpu_list, "r") as fp_cpu:
                 cpu_range = fp_cpu.read()
         except IOError:
-            print("Error: Cannot open %s" % (cpu_list))
+            print(f"Error: Cannot open {cpu_list}")
             sys.exit(-1)
         ranges = cpu_range.split(",")
         ret = []
@@ -742,7 +739,7 @@ class Pktgen:
         return ret
 
     def __get_driver(self):
-        driverpath = "/sys/class/net/%s/device/driver/module/drivers" % self.pgdev
+        driverpath = f"/sys/class/net/{self.pgdev}/device/driver/module/drivers"
         driver_types = os.listdir(driverpath)
         driver = ''
         pci = ''
@@ -751,17 +748,17 @@ class Pktgen:
                 driver = i.split(':')[1]
                 break
         if driver != '':
-            pcipath = "/sys/bus/pci/drivers/%s/" % driver
+            pcipath = f"/sys/bus/pci/drivers/{driver}/"
             pcis = os.listdir(pcipath)
             for i in pcis:
                 if ':' in i:
                     if driver == 'virtio_net':
-                        for j in os.listdir("/sys/bus/pci/drivers/virtio-pci/%s/" %  i):
+                        for j in os.listdir(f"/sys/bus/pci/drivers/virtio-pci/{i}/"):
                             if j.startswith("virtio"):
-                                pcidev = "/sys/bus/pci/drivers/virtio-pci/%s/%s/net" % (i, j)
+                                pcidev = f"/sys/bus/pci/drivers/virtio-pci/{i}/{j}/net"
                                 break
                     else:
-                        pcidev = "/sys/bus/pci/drivers/%s/%s/net" % (driver, i)
+                        pcidev = f"/sys/bus/pci/drivers/{driver}/{i}/net"
                     namepath = os.listdir(pcidev)
                     if namepath[0] == self.pgdev:
                         pci = i
@@ -769,17 +766,11 @@ class Pktgen:
         return driver, pci
 
     def __get_irqs(self):
-        """read out irqs"""
-        # driver, pci = self.__get_driver()
-        # print(driver)
-        # print(pci)
-        # pcipath = "/sys/bus/pci/devices/%s/" % pci
-        # for i in os.listdir(pcipath):
         """ Once IRQs are allocated by the driver, they are named mlx5_comp<x>@pci:<pci_addr>.
           The IRQs corresponding to the channels in use are renamed to <interface>-<x>,
           while the rest maintain their default name."""
         proc_intr = "/proc/interrupts"
-        msi_irqs = "/sys/class/net/%s/device/msi_irqs" % self.pgdev
+        msi_irqs = f"/sys/class/net/{self.pgdev}/device/msi_irqs"
         try:
             with open(proc_intr, "r") as fp_proc:
                 intrs = fp_proc.read()
@@ -787,14 +778,16 @@ class Pktgen:
             return []
         irqs = []
         devq_irq = re.compile(
-            r"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-.*TxRx-\d+" % (self.pgdev)
+            fr"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+{self.pgdev}-.*TxRx-\d+"
         )
         match = devq_irq.finditer(intrs)
         if len(devq_irq.findall(intrs)) > 0:
             for i in match:
                 irqs.append(int(i.group(1)))
             return irqs
-        dev_irq = re.compile(r"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+%s-\d+" % (self.pgdev))
+        dev_irq = re.compile(
+            fr"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+{self.pgdev}-\d+"
+        )
         match = dev_irq.finditer(intrs)
         if len(dev_irq.findall(intrs)) > 0:
             for i in match:
@@ -803,7 +796,7 @@ class Pktgen:
         try:
             dirs = os.listdir(msi_irqs)
             for dev_q in dirs:
-                msi_irq = re.compile(r"%s:.*TxRx" % dev_q)
+                msi_irq = re.compile(fr"{dev_q}:.*TxRx")
                 match = msi_irq.search(intrs)
                 if match is not None:
                     irqs.append(int(dev_q))
