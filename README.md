@@ -1,4 +1,4 @@
-# pktperf
+# pktperf  ![Pylint Score](https://github.com/junka/pktperf/workflows/Pylint/badge.svg)
 pktgen is very useful for network performance test, especially when we don't have multiple nics for dpdk in a vm.
 
 It makes use of the sample scripts in linux kernel [samples/pktgen](https://github.com/torvalds/linux/tree/master/samples/pktgen)
