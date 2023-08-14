@@ -10,7 +10,7 @@ from .pktgen import Pktgen, modinfo_check
 
 
 parser = argparse.ArgumentParser(
-    description="pktgen python scripts %s" % modinfo_check(), epilog="\n"
+    description=f"pktgen python scripts {modinfo_check()}", epilog="\n"
 )
 parser.add_argument("-i", "--interface", help="output interface/device", required=False)
 parser.add_argument("-s", "--size", help="packet size", default=60, required=False)

@@ -1,3 +1,4 @@
+"""sar with ethtool -S for bond"""
 #!/usr/bin/env python
 from __future__ import print_function
 from __future__ import division
@@ -14,35 +15,27 @@ import argparse
 import netifaces
 
 
-stop = False
+STOP = False
 
 
 def check_output(args, stderr=None):
     """Run a command and capture its output"""
-    p = subprocess.Popen(args, stdout=subprocess.PIPE, shell=False, stderr=stderr)
-    out, err = p.communicate()
-    return p.returncode, out, err
+    with subprocess.Popen(args, stdout=subprocess.PIPE, shell=False, stderr=stderr) as proc:
+        out, err = proc.communicate()
+    return proc.returncode, out, err
 
 
-def print_format_header(tm):
+def print_format_header(timestamp):
+    """header format"""
+    # pylint: disable=line-too-long
     print(
-        "% s% 20s% 16s% 16s% 16s% 16s% 16s % 16s"
-        % (
-            tm,
-            "IFACE",
-            "rxpck/s",
-            "txpck/s",
-            "rxkB/s",
-            "txkB/s",
-            "txdrop/s",
-            "rxdrop/s",
-        )
+        f'{timestamp} {"IFACE":20}{"rxpck/s":16}{"txpck/s":16}{"rxkB/s":16}{"txkB/s":16}{"txdrops/s":16}{"rxdrop/s":16}'
     )
 
 
 def print_format_string(
-    tm,
-    port_name,
+    tmstamp,
+    pname,
     diff_rxpkts,
     diff_txpkts,
     diff_rxbytes,
@@ -50,6 +43,8 @@ def print_format_string(
     diff_txdrops,
     diff_rxdrops,
 ):
+    """ print as format """
+    #pylint: disable=too-many-arguments
     rxpps = Decimal(diff_rxpkts).quantize(Decimal("0.00"))
     txpps = Decimal(diff_txpkts).quantize(Decimal("0.00"))
     rxbps = Decimal(diff_rxbytes / (1024)).quantize(Decimal("0.00"))
@@ -57,8 +52,7 @@ def print_format_string(
     txdrop = Decimal(diff_txdrops / (1024)).quantize(Decimal("0.00"))
     rxdrop = Decimal(diff_rxdrops / (1024)).quantize(Decimal("0.00"))
     print(
-        "%s% 20s% 16s% 16s% 16s% 16s% 16s % 16s"
-        % (tm, port_name, rxpps, txpps, rxbps, txbps, txdrop, rxdrop)
+        f"{tmstamp} {pname:20}{rxpps:16}{txpps:16}{rxbps:16}{txbps:16}{txdrop:16}{rxdrop:16}"
     )
 
 
@@ -68,6 +62,7 @@ class PhyStats:
 
     @ \todo dynamic port add
     """
+    #pylint: disable=too-many-instance-attributes
 
     def __init__(self, name):
         self._name = name
@@ -115,21 +110,23 @@ class PhyStats:
         self._delta_rx_oob = 0
         self._delta_rx_oversize = 0
 
-        self._type = 0
+        self.type = 0
         self._init_stats()
 
     def set_interval(self, interval):
+        """set interval"""
         self._interval = interval
 
     def _init_stats(self):
-        ret, stats_info, err = check_output(["ethtool", "-S", self._name])
+        """get stats"""
+        ret, _, err = check_output(["ethtool", "-S", self._name])
         if ret != 0:
             return
         if err is not None:
             drv = re.search(r"no stats available", err.decode())
             if drv is not None:
                 return
-        self._type = 1
+        self.type = 1
         self.update_stats()
         self._init_rx_pkts = self._rx_pkts
         self._init_tx_pkts = self._tx_pkts
@@ -162,8 +159,10 @@ class PhyStats:
         https://enterprise-support.nvidia.com/s/article/understanding-mlx5-ethtool-counters
 
         """
+        # pylint: disable=too-many-statements
+        # pylint: disable=too-many-locals
         self._times += 1
-        _, statsresult, err = check_output(["ethtool", "-S", self._name])
+        _, statsresult, _ = check_output(["ethtool", "-S", self._name])
         stats_info = statsresult.decode()
         rxdrop = re.search(r"rx_discards_phy: (\d+)", stats_info)
         txdrop = re.search(r"tx_discards_phy: (\d+)", stats_info)
@@ -214,7 +213,8 @@ class PhyStats:
             self._delta_rx_oversize = int(rxoversize.group(1)) - self._rx_oversize
             self._rx_oversize = int(rxoversize.group(1))
 
-    def print_calc_stats(self, ts):
+    def print_calc_stats(self, tstamp):
+        """ print a port stats"""
         port_name = self._name
         diff_rxpkts = (self._delta_rx_pkts_phy) / (self._interval)
         diff_txpkts = (self._delta_tx_pkts_phy) / (self._interval)
@@ -225,7 +225,7 @@ class PhyStats:
             self._interval
         )
         print_format_string(
-            ts,
+            tstamp,
             port_name,
             diff_rxpkts,
             diff_txpkts,
@@ -236,6 +236,7 @@ class PhyStats:
         )
 
     def print_average_stats(self):
+        """ print average stats"""
         port_name = self._name
         diff_rxpkts = (self._rx_pkts_phy - self._init_rx_pkts_phy) / (
             self._interval * (self._times - 1)
@@ -286,46 +287,53 @@ class Bond:
         self._name = name
         self._phys = []
         self._initphys = []
-        slavespath = "/sys/class/net/%s/bonding/slaves" % name
+        slavespath = f"/sys/class/net/{name}/bonding/slaves"
         if exists(slavespath):
             try:
-                with open(slavespath, "r", encoding="utf-8") as f:
-                    self.slaves = f.read().split()
+                with open(slavespath, "r", encoding="utf-8") as f_slave:
+                    self.slaves = f_slave.read().split()
             except IOError:
-                sys.exit("Error: unable to read slaves for %s", name)
+                sys.exit(f"Error: unable to read slaves for {name}")
         else:
-            sys.exit("Error: unable to find slaves file for %s", name)
-        print("%s has slaves %s" % (name, self.slaves))
+            sys.exit(f"Error: unable to find slaves file for {name}")
+        print(f"{name} has slaves {self.slaves}")
         for i in self.slaves:
             phy = PhyStats(i)
-            if phy._type == 0:
+            if phy.type == 0:
                 sys.exit("Error: slaves are not phy ports")
             self._phys.append(phy)
 
     def set_interval(self, interval):
+        """ interval for all slave """
         for i in self._phys:
             i.set_interval(interval)
 
     def update_stats(self):
+        """ update all slave inteface"""
         self._times += 1
         for i in self._phys:
             i.update_stats()
 
-    def print_calc_stats(self, ts):
-        for m in self._phys:
-            m.print_calc_stats(ts)
+    def print_calc_stats(self, tstamp):
+        """ calc status for all slave"""
+        for i in self._phys:
+            i.print_calc_stats(tstamp)
 
     def print_average_stats(self):
-        for m in self._phys:
-            m.print_average_stats()
+        """ average stats for all slave"""
+        for i in self._phys:
+            i.print_average_stats()
 
 
 def signal_handler():
-    global stop
-    stop = True
+    """ set stop """
+    #pylint: disable=global-statement
+    global STOP
+    STOP = True
 
 
 def bonding_list(names) -> (list, list):
+    """ bonding probe"""
     boding_path = "/proc/net/bonding"
     bonds = []
     unbondphys = []
@@ -342,42 +350,45 @@ def bonding_list(names) -> (list, list):
                     names.remove(i)
     if names is not None and len(names) > 0:
         for i in names:
-            p = PhyStats(i)
-            if p._type == 1:
-                unbondphys.append(p)
+            pstats = PhyStats(i)
+            if pstats.type == 1:
+                unbondphys.append(pstats)
     return bonds, unbondphys
 
 
 def main():
-    global stop
+    """ use this like a sar for bonding interface"""
+    #pylint: disable=global-variable-not-assigned
+    # pylint: disable=c-extension-no-member
+    global STOP
     parser = argparse.ArgumentParser(description="")
     parser.add_argument("--name", "-n", type=str, action="append")
     parser.add_argument("--interval", "-i", type=float, default=1)
     args = parser.parse_args()
     if args.name is not None and len(args.name) > 1:
-        for n in args.name:
-            if n not in netifaces.interfaces():
-                print("%s is not a valid interface name" % n)
-                exit()
+        for i in args.name:
+            if i not in netifaces.interfaces():
+                print(f"{i} is not a valid interface name" )
+                sys.exit()
     if args.name is not None:
         bonds, phys = bonding_list(args.name)
     else:
         bonds, phys = bonding_list(netifaces.interfaces())
     if len(bonds) == 0 and len(phys) == 0:
         print("no valid devices")
-        exit()
+        sys.exit()
     alldev = bonds + phys
     interval = args.interval + 0.0
     for i in alldev:
         i.set_interval(interval)
     signal.signal(signal.SIGINT, lambda signal, frame: signal_handler())
-    while stop is False:
+    while STOP is False:
         time.sleep(interval)
-        ts = datetime.datetime.now().strftime("%I:%M:%S %p")
-        print_format_header(ts)
+        tstamp = datetime.datetime.now().strftime("%I:%M:%S %p")
+        print_format_header(tstamp)
         for i in alldev:
             i.update_stats()
-            i.print_calc_stats(ts)
+            i.print_calc_stats(tstamp)
         print("")
     for i in alldev:
         i.print_average_stats()

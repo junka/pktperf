@@ -1,14 +1,18 @@
+""" install pktgen module maybe bdist instead
+"""
+import subprocess
 from setuptools import setup
 from setuptools.command.install import install
-import subprocess
 
 
 class CustomInstall(install):
+    """ CustomInstall to build pktgen from source when install
+    """
     def run(self):
-        process = subprocess.Popen(
+        with subprocess.Popen(
             ["make", "-C", "pktperf/module", "install"], shell=False
-        )
-        process.wait()
+        ) as process:
+            process.wait()
         super().run()
 
 

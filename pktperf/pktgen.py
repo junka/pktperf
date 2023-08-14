@@ -24,39 +24,45 @@ def open_write_error(filename, flag, mode="r+"):
 
 
 def cpu_count():
+    """get cpu core nums"""
     try:
-        res = open('/proc/cpuinfo', encoding='utf-8').read().count('processor\t:')
-        if res > 0:
-            return res
+        with open("/proc/cpuinfo", encoding="utf-8") as fp_cpu:
+            res = fp_cpu.read().count("processor\t:")
+            if res > 0:
+                return res
     except IOError:
         pass
     # cpuset
     # cpuset may restrict the number of *available* processors
     try:
-        m = re.search(r'(?m)^Cpus_allowed:\s*(.*)$',
-                      open('/proc/self/status', encoding='utf-8').read())
-        if m:
-            res = bin(int(m.group(1).replace(',', ''), 16)).count('1')
-            if res > 0:
-                return res
+        with open("/proc/self/status", encoding="utf-8") as fp_status:
+            cpuset = re.search(
+                r"(?m)^Cpus_allowed:\s*(.*)$",
+                fp_status.read(),
+            )
+            if cpuset:
+                res = bin(int(cpuset.group(1).replace(",", ""), 16)).count("1")
+                if res > 0:
+                    return res
     except IOError as exc:
         raise IOError("Error getting cpu count") from exc
+    return 0
 
 
 def modinfo_check() -> str:
     """check module version"""
-    n = platform.uname()
-    depfile = f"/lib/modules/{n.release}/modules.dep"
+    name = platform.uname()
+    depfile = f"/lib/modules/{name.release}/modules.dep"
     try:
         with open(depfile, "r", encoding="utf-8") as fp_dep:
             fp_dep.readlines()
     except IOError as exc:
         print("Fail to open modules.dep, maybe you are not root privellge")
         raise IOError("Error open modules.dep") from exc
-    p = subprocess.run(["modinfo", "pktgen"], stdout=subprocess.PIPE, check=True)
-    if p.returncode != 0:
+    proc = subprocess.run(["modinfo", "pktgen"], stdout=subprocess.PIPE, check=True)
+    if proc.returncode != 0:
         return ""
-    ret = p.stdout.decode("utf-8")
+    ret = proc.stdout.decode("utf-8")
     ver = re.search(r"version:[\t\ ]+([\d\.]+)", ret)
     if ver is not None:
         return ver.group(1)
@@ -75,6 +81,8 @@ class Pktgen:
 
     # pylint: disable=too-many-instance-attributes
     # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-statements
+    # pylint: disable=too-many-branches
     def __init__(self, args) -> None:
         """Init pktgen module with parameters
 
@@ -170,16 +178,17 @@ class Pktgen:
         self.rxq = []
         self.__read_config_file(args.file)
         if self.pgdev is None:
-            raise Exception("No interface specified")
+            raise ValueError("No interface specified")
         if self.dst_ip_min == "":
-            raise Exception("No dst ip specified")
+            raise ValueError("No dst ip specified")
         self.__init_irq(args.queuemap)
 
     def __read_config_file(self, file):
+        # pylint: disable=too-many-branches
         cfg = configparser.ConfigParser()
         if file is not None:
-            with open(file, "r", encoding="utf-8") as f:
-                config_string = "[dummy]\n" + f.read()
+            with open(file, "r", encoding="utf-8") as f_cfg:
+                config_string = "[dummy]\n" + f_cfg.read()
                 cfg.read_string(config_string)
         else:
             return
@@ -350,11 +359,11 @@ class Pktgen:
         try:
             with open(pgctrl, "r", encoding="utf-8") as f_ctl:
                 cont = f_ctl.read()
-                m = re.search(r"Version: (\d.\d+)", cont)
+                version = re.search(r"Version: (\d.\d+)", cont)
         except IOError:
             return ""
-        if m is not None:
-            return m.group(1)
+        if version is not None:
+            return version.group(1)
         return ""
 
     def pg_set(self, dev, flag) -> None:
@@ -367,7 +376,7 @@ class Pktgen:
 
     def __pg_get_devpath(self, index, role) -> str:
         """get dev path for thread index"""
-        if self.queue is True and role == 'tx':
+        if self.queue is True and role == "tx":
             dev = f"{self.pgdev}@{self.cpu_list[index]}"
         else:
             dev = f"{self.pgdev}@{index}"
@@ -400,7 +409,7 @@ class Pktgen:
     def __config_tos(self, dev) -> None:
         """config tos"""
         if self.tos is not None and self.tos != 0:
-            if self.ipv6 is True:
+            if self.dst_ip_min.version == 6:
                 self.pg_set(dev, f"traffic_class {self.tos:0x}")
             else:
                 self.pg_set(dev, f"tos {self.tos:0x}")
@@ -446,6 +455,7 @@ class Pktgen:
         else:
             self.pg_set(dev, f"src_min {self.src_ip_min}")
             self.pg_set(dev, f"src_max {self.src_ip_max}")
+        return 0
 
     def __config_imix(self, dev) -> None:
         if self.imixweight is not None:
@@ -497,20 +507,21 @@ class Pktgen:
 
     def config_queue(self) -> None:
         """configure queues for pktgen"""
+        # pylint: disable=too-many-branches
         # General cleanup everything since last run
         self.reset()
 
         # In a dedicated case, rxq num should equal to tx thread
         # if irq for a rxq binded to tx cpu, perfermance drop to 1/40
         for i, irq in enumerate(self.irq_list):
-            q = self.rxq[i % len(self.rxq)]
-            self.__config_irq_affinity(irq, q)
-            if q == cpu_count():
+            qid = self.rxq[i % len(self.rxq)]
+            self.__config_irq_affinity(irq, qid)
+            if qid == cpu_count():
                 continue
-            dev = f"{self.pgdev}@{q}"
+            dev = f"{self.pgdev}@{qid}"
             if self.append is False:
-                self.pg_thread(q, "rem_device_all")
-            self.pg_thread(q, f"add_device {dev}")
+                self.pg_thread(qid, "rem_device_all")
+            self.pg_thread(qid, f"add_device {dev}")
             self.pg_set(dev, "xmit_mode rx_only")
             self.pg_set(dev, "count 0")
 
@@ -620,15 +631,16 @@ class Pktgen:
 
     def result_transient(self, need_init, core_id, fp_dev, print_cb):
         """print result during"""
+        # pylint: disable=too-many-locals
         stats_content = fp_dev.read()
         sofar_field = re.compile(r"pkts-sofar: (\d+)  errors: (\d+)")
         time_field = re.compile(r"started: (\d+)us  stopped: (\d+)us")
         sofar = sofar_field.search(stats_content)
         tim = time_field.search(stats_content)
         if sofar is not None:
-            direction = 'TX'
+            direction = "TX"
         else:
-            direction = 'RX'
+            direction = "RX"
             sofar_field = re.compile(r"pkts-rx: (\d+)  bytes: (\d+)")
             sofar = sofar_field.search(stats_content)
         if need_init is True:
@@ -642,13 +654,14 @@ class Pktgen:
         pkt = 0
 
         pkt = int(sofar.group(1))
-        if direction == 'TX':
+        if direction == "TX":
             byt = pkt * self.pkt_size
         else:
             byt = int(sofar.group(2))
         pkt_sar.update(pkt, int(tim.group(2)), byt)
         pps, bps = pkt_sar.get_stats()
         print_cb(
+            # pylint: disable=line-too-long
             f"Core{core_id:3d} {direction} {pkt:18d} pkts: {pps:18f} pps {bps:18f} bps {byt:6d} bytes"
         )
 
@@ -656,6 +669,7 @@ class Pktgen:
 
     def result(self, last, print_cb) -> int:
         """Print results"""
+        # pylint: disable=too-many-locals
         if last is True:
             print(f"{self.threads} cores enabled")
         need_init = False
@@ -666,7 +680,7 @@ class Pktgen:
         if len(self.stats) == 0:
             need_init = True
         for i in self.thread_list:
-            with open(self.__pg_get_devpath(i, 'tx'), "r") as fp_dev:
+            with open(self.__pg_get_devpath(i, "tx"), "r", encoding="utf-8") as fp_dev:
                 if last is False:
                     sg_pkts, sg_pps, sg_bps, sg_bytes = self.result_transient(
                         need_init, i, fp_dev, print_cb
@@ -680,6 +694,7 @@ class Pktgen:
                 total_bps += sg_bps
                 total_bytes += sg_bytes
         print_cb(
+            # pylint: disable=line-too-long
             f"Total   TX {total_pkts:18d} pkts: {total_pps:18d} pps {total_bps:18d} bps {total_bytes:6d} bytes"
         )
 
@@ -689,20 +704,25 @@ class Pktgen:
         total_bytes = 0
         rx_cnt = 0
         for i, _ in enumerate(self.irq_list):
-            q = self.rxq[i % len(self.rxq)]
-            if q == cpu_count():
+            qid = self.rxq[i % len(self.rxq)]
+            if qid == cpu_count():
                 continue
             rx_cnt += 1
-            with open(self.__pg_get_devpath(q, 'rx'), "r", encoding="utf-8") as fp_dev:
+            with open(
+                self.__pg_get_devpath(qid, "rx"), "r", encoding="utf-8"
+            ) as fp_dev:
                 sg_pkts, sg_pps, sg_bps, sg_bytes = self.result_transient(
-                    need_init, q, fp_dev, print_cb
+                    need_init, qid, fp_dev, print_cb
                 )
                 total_pkts += sg_pkts
                 total_pps += sg_pps
                 total_bps += sg_bps
                 total_bytes += sg_bytes
         if rx_cnt > 0:
-            print_cb(f"Total   RX {total_pkts:18d} pkts: {total_pps:18d} pps {total_bps:18d} bps {total_bytes:6d} bytes")
+            print_cb(
+                # pylint: disable=line-too-long
+                f"Total   RX {total_pkts:18d} pkts: {total_pps:18d} pps {total_bps:18d} bps {total_bytes:6d} bytes"
+            )
         if last is False and self.num > 0 and total_pkts >= self.num:
             return 1
         return 0
@@ -725,7 +745,7 @@ class Pktgen:
         """__node_cpu_list returns the cpu list of the node"""
         cpu_list = f"/sys/devices/system/node/node{node}/cpulist"
         try:
-            with open(cpu_list, "r") as fp_cpu:
+            with open(cpu_list, "r", encoding="utf-8") as fp_cpu:
                 cpu_range = fp_cpu.read()
         except IOError:
             print(f"Error: Cannot open {cpu_list}")
@@ -738,56 +758,27 @@ class Pktgen:
                 ret.append(j)
         return ret
 
-    def __get_driver(self):
-        driverpath = f"/sys/class/net/{self.pgdev}/device/driver/module/drivers"
-        driver_types = os.listdir(driverpath)
-        driver = ''
-        pci = ''
-        for i in driver_types:
-            if i.startswith('pci:') or i.startswith('virtio:'):
-                driver = i.split(':')[1]
-                break
-        if driver != '':
-            pcipath = f"/sys/bus/pci/drivers/{driver}/"
-            pcis = os.listdir(pcipath)
-            for i in pcis:
-                if ':' in i:
-                    if driver == 'virtio_net':
-                        for j in os.listdir(f"/sys/bus/pci/drivers/virtio-pci/{i}/"):
-                            if j.startswith("virtio"):
-                                pcidev = f"/sys/bus/pci/drivers/virtio-pci/{i}/{j}/net"
-                                break
-                    else:
-                        pcidev = f"/sys/bus/pci/drivers/{driver}/{i}/net"
-                    namepath = os.listdir(pcidev)
-                    if namepath[0] == self.pgdev:
-                        pci = i
-                        break
-        return driver, pci
-
     def __get_irqs(self):
-        """ Once IRQs are allocated by the driver, they are named mlx5_comp<x>@pci:<pci_addr>.
-          The IRQs corresponding to the channels in use are renamed to <interface>-<x>,
-          while the rest maintain their default name."""
+        """Once IRQs are allocated by the driver, they are named mlx5_comp<x>@pci:<pci_addr>.
+        The IRQs corresponding to the channels in use are renamed to <interface>-<x>,
+        while the rest maintain their default name."""
         proc_intr = "/proc/interrupts"
         msi_irqs = f"/sys/class/net/{self.pgdev}/device/msi_irqs"
         try:
-            with open(proc_intr, "r") as fp_proc:
+            with open(proc_intr, "r", encoding="utf-8") as fp_proc:
                 intrs = fp_proc.read()
         except IOError:
             return []
         irqs = []
         devq_irq = re.compile(
-            fr"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+{self.pgdev}-.*TxRx-\d+"
+            rf"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+{self.pgdev}-.*TxRx-\d+"
         )
         match = devq_irq.finditer(intrs)
         if len(devq_irq.findall(intrs)) > 0:
             for i in match:
                 irqs.append(int(i.group(1)))
             return irqs
-        dev_irq = re.compile(
-            fr"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+{self.pgdev}-\d+"
-        )
+        dev_irq = re.compile(rf"(\d+):[ \d]+ [\w-]+ \d+-edge[ ]+{self.pgdev}-\d+")
         match = dev_irq.finditer(intrs)
         if len(dev_irq.findall(intrs)) > 0:
             for i in match:
@@ -796,7 +787,7 @@ class Pktgen:
         try:
             dirs = os.listdir(msi_irqs)
             for dev_q in dirs:
-                msi_irq = re.compile(fr"{dev_q}:.*TxRx")
+                msi_irq = re.compile(rf"{dev_q}:.*TxRx")
                 match = msi_irq.search(intrs)
                 if match is not None:
                     irqs.append(int(dev_q))
