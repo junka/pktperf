@@ -163,16 +163,17 @@ class Pktgen:
             self.frags = int(args.frags)
         self.vlan = args.vlan
         self.svlan = args.svlan
-        self.tun_vni = args.vni
-        self.tun_udpport = args.tundport
-        self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(args.tundst)
-        self.tun_src_min, self.tun_src_max = self.__init_ip_input(args.tunsrc)
-        self.inner_dmac = args.innerdmac
-        self.inner_smac = args.innersmac
-        self.inner_dmac_count = 0
-        self.inner_smac_count = 0
-        self.microburst = args.microburst
-        self.imixweight = args.imix
+        if ver == "3.0":
+            self.tun_vni = args.vni
+            self.tun_udpport = args.tundport
+            self.tun_dst_min, self.tun_dst_max = self.__init_ip_input(args.tundst)
+            self.tun_src_min, self.tun_src_max = self.__init_ip_input(args.tunsrc)
+            self.inner_dmac = args.innerdmac
+            self.inner_smac = args.innersmac
+            self.inner_dmac_count = 0
+            self.inner_smac_count = 0
+            self.microburst = args.microburst
+            self.imixweight = args.imix
         self.tcp = None
         self.mode = None
         self.rxq = []
@@ -302,18 +303,20 @@ class Pktgen:
             except (ValueError, TypeError):
                 print("invalid ip address format")
                 sys.exit()
+            ip_max = ip_min
             if len(ip_list) == 2:
                 try:
                     ip_max = ipaddress.ip_address(ip_list[1])
                 except (ValueError, TypeError):
                     print("invalid ip address format")
                     sys.exit()
-            elif len(ip_list) == 1:
-                ip_max = ip_min
         if net is not None:
             ip_list = list(net)
             ip_min = ip_list[0]
             ip_max = ip_list[-1]
+        else:
+            ip_min = None
+            ip_max = None
         return ip_min, ip_max
 
     def __init_port_range(self, portrange):
@@ -473,6 +476,7 @@ class Pktgen:
     def __config_tun_meta(self, dev) -> None:
         if self.tun_vni is not None:
             vni = self.tun_vni.split("-")
+            vni_max = vni[0]
             if len(vni) == 2:
                 vni_max = vni[1]
             elif len(vni) == 1:
