@@ -174,6 +174,19 @@ class Pktgen:
             self.inner_smac_count = 0
             self.microburst = args.microburst
             self.imixweight = args.imix
+        else:
+            self.tun_vni = None
+            self.tun_udpport = None
+            self.tun_dst_min = None
+            self.tun_dst_max = None
+            self.tun_src_min = None
+            self.tun_src_max = None
+            self.inner_dmac = None
+            self.inner_smac = None
+            self.inner_dmac_count = 0
+            self.inner_smac_count = 0
+            self.microburst = None
+            self.imixweight = None
         self.tcp = None
         self.mode = None
         self.rxq = []
@@ -666,7 +679,7 @@ class Pktgen:
         pps, bps = pkt_sar.get_stats()
         print_cb(
             # pylint: disable=line-too-long
-            f"Core{core_id:3d} {direction} {pkt:18d} pkts: {pps:18f} pps {bps:18f} bps {byt:6d} bytes"
+            f"Core{core_id:3d} {direction} {pkt:18d} pkts: {pps:18.2f} pps {bps:18.2f} bps {byt:6d} bytes"
         )
 
         return pkt, pps, bps, byt
@@ -699,7 +712,7 @@ class Pktgen:
                 total_bytes += sg_bytes
         print_cb(
             # pylint: disable=line-too-long
-            f"Total   TX {total_pkts:18d} pkts: {total_pps:18d} pps {total_bps:18d} bps {total_bytes:6d} bytes"
+            f"Total   TX {total_pkts:18d} pkts: {total_pps:18.2f} pps {total_bps:18.2f} bps {total_bytes:6d} bytes"
         )
 
         total_pkts = 0

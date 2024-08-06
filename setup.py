@@ -18,7 +18,7 @@ class CustomInstall(install):
 
 setup(
     name= 'pktperf',
-    version = "0.5.7",
+    version = "0.5.8",
     has_ext_modules=lambda: True,
     cmdclass={"install": CustomInstall},
     platforms=["manylinux2014_x86_64"],

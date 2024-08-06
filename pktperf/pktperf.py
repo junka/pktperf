@@ -12,7 +12,7 @@ from .pktgen import Pktgen, modinfo_check
 parser = argparse.ArgumentParser(
     description=f"pktgen python scripts {modinfo_check()}", epilog="\n"
 )
-parser.add_argument("-i", "--interface", help="output interface/device", required=False)
+parser.add_argument("-i", "--interface", help="output interface/device", required=True)
 parser.add_argument("-s", "--size", help="packet size", default=60, required=False)
 parser.add_argument(
     "-d",
@@ -130,6 +130,9 @@ def ui_func(pktgen, event):
 def main():
     """main function entry"""
     args = parser.parse_args()
+    if os.path.exists(f"/sys/class/net/{args.interface}") is False:
+        print(f"{args.interface} is not a valid interface")
+        return
     pktgen = Pktgen(args)
 
     event = Event()
@@ -152,7 +155,7 @@ def main():
     signal.signal(signal.SIGINT, sig_exit)
     signal.signal(signal.SIGALRM, sig_exit)
 
-    if int(args.timeout) > 0:
+    if modinfo_check() == "3.0" and int(args.timeout) > 0:
         signal.alarm(int(args.timeout))
     pktgen.config_queue()
     tui.start()
