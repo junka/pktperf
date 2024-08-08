@@ -307,6 +307,8 @@ class Pktgen:
         if ipstr is None:
             return "", ""
         net = None
+        ip_min = None
+        ip_max = None
         try:
             net = ipaddress.ip_network(ipstr, strict=False)
         except (ValueError, TypeError):
@@ -316,20 +318,15 @@ class Pktgen:
             except (ValueError, TypeError):
                 print("invalid ip address format")
                 sys.exit()
-            ip_max = ip_min
-            if len(ip_list) == 2:
-                try:
-                    ip_max = ipaddress.ip_address(ip_list[1])
-                except (ValueError, TypeError):
-                    print("invalid ip address format")
-                    sys.exit()
+            try:
+                ip_max = ipaddress.ip_address(ip_list[1])
+            except (ValueError, TypeError):
+                print("invalid ip address format")
+                sys.exit()
         if net is not None:
             ip_list = list(net)
             ip_min = ip_list[0]
             ip_max = ip_list[-1]
-        else:
-            ip_min = None
-            ip_max = None
         return ip_min, ip_max
 
     def __init_port_range(self, portrange):
